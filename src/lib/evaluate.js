@@ -118,6 +118,27 @@ export function localEvaluation({ settings, history, stats }) {
 }
 
 export function normalizeModelEvaluation(data, fallback) {
+  // 以本地逐题结果为准合并模型结果：模型少返回某题时保留本地反馈，避免整题丢失。
+  const mergePerQuestion = (modelList, fallbackList) => {
+    const baseList = Array.isArray(fallbackList) ? fallbackList : [];
+    const source = Array.isArray(modelList) ? modelList : [];
+    const length = Math.max(baseList.length, source.length);
+    return Array.from({ length }, (_, index) => {
+      const base = baseList[index] || {};
+      const item = source[index] || {};
+      return {
+        questionIndex: index,
+        question: base.question || "",
+        focus: base.focus || "综合考察",
+        answer: base.answer || "",
+        score: Number.isFinite(Number(item?.score)) ? clamp(Number(item.score)) : base.score || 0,
+        issues: Array.isArray(item?.issues) && item.issues.length ? item.issues.map(String) : base.issues || [],
+        plan: typeof item?.plan === "string" && item.plan ? item.plan : base.plan || "请按评分建议重新练习",
+        strengths:
+          Array.isArray(item?.strengths) && item.strengths.length ? item.strengths.map(String) : base.strengths || []
+      };
+    });
+  };
   const scores = {};
   DIMENSIONS.forEach((dim) => {
     const value = Number(data?.scores?.[dim.key]);
@@ -137,22 +158,7 @@ export function normalizeModelEvaluation(data, fallback) {
       Array.isArray(data?.actionPlan) && data.actionPlan.length
         ? data.actionPlan.map(String)
         : fallback.actionPlan || [],
-    perQuestion:
-      Array.isArray(data?.perQuestion) && data.perQuestion.length
-        ? data.perQuestion.map((item, index) => {
-            const base = fallback.perQuestion?.[index] || {};
-            return {
-              questionIndex: index,
-              question: base.question || "",
-              focus: base.focus || "综合考察",
-              answer: base.answer || "",
-              score: Number.isFinite(Number(item?.score)) ? clamp(Number(item.score)) : base.score || 0,
-              issues: Array.isArray(item?.issues) && item.issues.length ? item.issues.map(String) : base.issues || [],
-              plan: typeof item?.plan === "string" && item.plan ? item.plan : base.plan || "请按评分建议重新练习",
-              strengths: Array.isArray(item?.strengths) && item.strengths.length ? item.strengths.map(String) : base.strengths || []
-            };
-          })
-        : fallback.perQuestion || [],
+    perQuestion: mergePerQuestion(data?.perQuestion, fallback.perQuestion),
     source: "model"
   };
 }
