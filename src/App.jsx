@@ -133,6 +133,62 @@ export default function App() {
     if (currentResult?.id === id) setCurrentResult(null);
   }
 
+  const recordsPage = (
+    <div className="records-page">
+      <div className="records-toolbar">
+        <button
+          className={summaryTab === "report" ? "active" : ""}
+          onClick={() => setSummaryTab("report")}
+          disabled={!currentResult}
+        >
+          本场复盘报告
+        </button>
+        <button
+          className={summaryTab === "records" ? "active" : ""}
+          onClick={() => setSummaryTab("records")}
+        >
+          最近 7 场记录
+        </button>
+      </div>
+      {summaryTab === "report" && currentResult ? (
+        <ReportView
+          result={currentResult}
+          onBack={() => setSummaryTab("records")}
+          onNew={() => goPage("simulate")}
+        />
+      ) : (
+        <HistoryView
+          history={history}
+          onOpen={(result) => {
+            setCurrentResult(result);
+            setSummaryTab("report");
+          }}
+          onDelete={handleDelete}
+          onNew={() => goPage("simulate")}
+        />
+      )}
+    </div>
+  );
+
+  // 页面路由表：新增页面只需在此登记，主区域不再堆叠条件渲染。
+  const PAGE_RENDERERS = {
+    workbench: () => (
+      <WorkbenchPage
+        settings={settings}
+        history={history}
+        onNavigate={goPage}
+        onVoiceChange={(voiceName) => saveConfig({ ...settings, voiceName })}
+      />
+    ),
+    resume: () => <ResumeAnalysisPage settings={settings} onSave={saveConfig} onNext={() => goPage("simulate")} />,
+    simulate: () => (
+      <ResumeSetupView settings={settings} onStart={startInterviewFromResume} onBack={() => goPage("resume")} />
+    ),
+    model: () => <ApiAccessView settings={settings} standalone onSaved={saveConfig} onNext={saveConfig} />,
+    interview: () => <InterviewView settings={settings} onFinish={handleFinish} onExit={() => goPage("simulate")} />,
+    records: () => recordsPage
+  };
+
   if (page === "onboarding") {
     return (
       <div className={`onboarding-shell theme-${currentTheme.key}`}>
@@ -291,84 +347,7 @@ export default function App() {
       </aside>
 
       <main className="guide-content">
-        {page === "workbench" ? (
-          <WorkbenchPage
-            settings={settings}
-            history={history}
-            onNavigate={goPage}
-            onVoiceChange={(voiceName) => saveConfig({ ...settings, voiceName })}
-          />
-        ) : null}
-
-        {page === "resume" ? (
-          <ResumeAnalysisPage
-            settings={settings}
-            onSave={saveConfig}
-            onNext={() => goPage("simulate")}
-          />
-        ) : null}
-
-        {page === "simulate" ? (
-          <ResumeSetupView
-            settings={settings}
-            onStart={startInterviewFromResume}
-            onBack={() => goPage("resume")}
-          />
-        ) : null}
-
-        {page === "model" ? (
-          <ApiAccessView
-            settings={settings}
-            standalone
-            onSaved={saveConfig}
-            onNext={saveConfig}
-          />
-        ) : null}
-
-        {page === "interview" ? (
-          <InterviewView
-            settings={settings}
-            onFinish={handleFinish}
-            onExit={() => goPage("simulate")}
-          />
-        ) : null}
-
-        {page === "records" ? (
-          <div className="records-page">
-            <div className="records-toolbar">
-              <button
-                className={summaryTab === "report" ? "active" : ""}
-                onClick={() => setSummaryTab("report")}
-                disabled={!currentResult}
-              >
-                本场复盘报告
-              </button>
-              <button
-                className={summaryTab === "records" ? "active" : ""}
-                onClick={() => setSummaryTab("records")}
-              >
-                最近 7 场记录
-              </button>
-            </div>
-            {summaryTab === "report" && currentResult ? (
-              <ReportView
-                result={currentResult}
-                onBack={() => setSummaryTab("records")}
-                onNew={() => goPage("simulate")}
-              />
-            ) : (
-              <HistoryView
-                history={history}
-                onOpen={(result) => {
-                  setCurrentResult(result);
-                  setSummaryTab("report");
-                }}
-                onDelete={handleDelete}
-                onNew={() => goPage("simulate")}
-              />
-            )}
-          </div>
-        ) : null}
+        {PAGE_RENDERERS[page]?.()}
       </main>
       <ThemePalette theme={currentTheme.key} onChange={setTheme} />
     </div>

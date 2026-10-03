@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ArrowRight, Camera, Check, LoaderCircle, MessageSquareText, Mic, Video } from "lucide-react";
+import { getSpeechRecognitionCtor } from "../hooks/useSpeechRecognition.js";
 
 function ModeCard({ mode, current, onChange }) {
   return (
@@ -23,6 +24,7 @@ function ModeCard({ mode, current, onChange }) {
 
 export default function DeviceSetupPage({ settings, onBack, onNext }) {
   const [form, setForm] = useState({ ...settings });
+  const speechSupported = Boolean(getSpeechRecognitionCtor());
   const [micState, setMicState] = useState("idle");
   const [cameraState, setCameraState] = useState("idle");
   const [micMsg, setMicMsg] = useState("");
@@ -80,6 +82,12 @@ export default function DeviceSetupPage({ settings, onBack, onNext }) {
               <small>语音识别需要麦克风权限</small>
             </div>
           </div>
+          {speechSupported ? null : (
+            <div className="inline-warning">
+              当前浏览器不支持语音识别（Web Speech API），语音面试会自动降级为文字回答。
+              建议使用最新版 Chrome 或 Edge。
+            </div>
+          )}
           <div className="device-check-line">
             <button className="outline-btn" onClick={checkMic} disabled={micState === "loading"}>
               {micState === "loading" ? <LoaderCircle className="spin" size={15} /> : micState === "ok" ? <Check size={15} /> : <Mic size={15} />}

@@ -11,7 +11,6 @@ import {
   Mic,
   Sparkles,
   UserRound,
-  Video
 } from "lucide-react";
 import GalaxyCanvas from "./GalaxyCanvas.jsx";
 

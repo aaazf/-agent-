@@ -1,30 +1,7 @@
 const SECTION_HEADING = /^(项目经历|项目经验|项目实践|教育背景|教育经历|工作经历|实习经历|专业技能|技能特长|技能|自我评价|个人总结|获奖情况|证书|荣誉)/;
-const TECH_HINTS = [
-  "react",
-  "vue",
-  "typescript",
-  "python",
-  "java",
-  "go",
-  "mysql",
-  "redis",
-  "sql",
-  "spark",
-  "hive",
-  "flink",
-  "docker",
-  "kubernetes",
-  "etl",
-  "node",
-  "数据分析",
-  "可视化",
-  "bi",
-  "tableau",
-  "power bi"
-];
-
 function cleanLines(raw = "") {
   return raw
+    // eslint-disable-next-line no-control-regex -- 简历文本里可能夹带 NUL 控制字符，需要清理
     .replace(/\u0000/g, "")
     .split(/\r?\n/)
     .map((line) => line.trim())

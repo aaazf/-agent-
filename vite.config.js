@@ -7,6 +7,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MODEL_CATALOG } from "./src/lib/providers.js";
+
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const EDGE_PYTHON =
   process.env.EDGE_TTS_PYTHON ||
@@ -90,6 +92,46 @@ function runTtsProcess(payloadFile, output) {
     });
   });
 }
+
+// baseUrl 白名单：默认只允许目录里预置的服务商域名，避免被当成任意请求的跳板（SSRF）。
+const ALLOWED_MODEL_HOSTS = new Set(
+  Object.values(MODEL_CATALOG)
+    .map((config) => config.baseUrl)
+    .filter(Boolean)
+    .map((url) => new URL(url).hostname)
+);
+(process.env.ALLOW_MODEL_HOSTS || "")
+  .split(",")
+  .map((host) => host.trim().toLowerCase())
+  .filter(Boolean)
+  .forEach((host) => ALLOWED_MODEL_HOSTS.add(host));
+const ALLOW_LOCAL_MODEL_HOST = process.env.ALLOW_LOCAL_MODEL_HOST === "1";
+
+function resolveUpstreamUrl(raw) {
+  let parsed;
+  try {
+    parsed = new URL(String(raw).trim());
+  } catch {
+    return { ok: false, error: "Base URL 不是合法地址" };
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return { ok: false, error: "Base URL 仅支持 http/https" };
+  }
+  const host = parsed.hostname.toLowerCase();
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+  if (!ALLOWED_MODEL_HOSTS.has(host) && !(ALLOW_LOCAL_MODEL_HOST && isLocal)) {
+    return {
+      ok: false,
+      error: `Base URL 主机 ${host} 不在白名单内；如需接入，请在启动前设置 ALLOW_MODEL_HOSTS=${host}`
+    };
+  }
+  const cleanBase = parsed.toString().replace(/\/+$/, "");
+  return {
+    ok: true,
+    url: cleanBase.endsWith("/chat/completions") ? cleanBase : `${cleanBase}/chat/completions`
+  };
+}
+
 function clampNumber(value, fallback, min, max) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
@@ -115,24 +157,45 @@ function llmProxy() {
         res.end(JSON.stringify({ error: "baseUrl / apiKey / model / messages 不能为空" }));
         return;
       }
-      const cleanBase = String(baseUrl).trim().replace(/\/+$/, "");
-      const upstreamUrl = cleanBase.endsWith("/chat/completions")
-        ? cleanBase
-        : `${cleanBase}/chat/completions`;
-      const upstream = await fetch(upstreamUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${String(apiKey).trim()}`
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          temperature: clampNumber(temperature, 0.75, 0, 2),
-          max_tokens: clampNumber(maxTokens, 1200, 16, 8192),
-          stream: false
-        })
-      });
+      const target = resolveUpstreamUrl(baseUrl);
+      if (!target.ok) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: target.error }));
+        return;
+      }
+      // 客户端断开（AbortController / 关闭页面）时同步中断上游请求，避免无谓的长等待。
+      const controller = new AbortController();
+      const abortUpstream = () => controller.abort();
+      res.on("close", abortUpstream);
+      let upstream;
+      try {
+        upstream = await fetch(target.url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${String(apiKey).trim()}`
+          },
+          body: JSON.stringify({
+            model,
+            messages,
+            temperature: clampNumber(temperature, 0.75, 0, 2),
+            max_tokens: clampNumber(maxTokens, 1200, 16, 8192),
+            stream: false
+          }),
+          signal: controller.signal
+        });
+      } catch (err) {
+        if (controller.signal.aborted) {
+          if (!res.writableEnded && !res.destroyed) {
+            res.statusCode = 499;
+            res.end(JSON.stringify({ error: "客户端已取消请求" }));
+          }
+          return;
+        }
+        throw err;
+      } finally {
+        res.off("close", abortUpstream);
+      }
       const raw = await upstream.text();
       let data;
       try {
@@ -272,5 +335,9 @@ export default defineConfig({
   server: {
     port: 4173,
     strictPort: false
+  },
+  test: {
+    environment: "jsdom",
+    include: ["tests/**/*.test.js"]
   }
 });

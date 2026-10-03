@@ -5,7 +5,6 @@ import {
   Camera,
   CameraOff,
   Check,
-  ChevronLeft,
   CircleStop,
   Clock3,
   FileText,
@@ -14,7 +13,6 @@ import {
   MessageSquareText,
   Mic,
   MicOff,
-  Play,
   RotateCcw,
   Send,
   Sparkles,
@@ -26,17 +24,10 @@ import { callModel, generateInterviewerDecision, buildEvaluateMessages, extractJ
 import { localQuestion } from "../lib/questions.js";
 import { localEvaluation, normalizeModelEvaluation } from "../lib/evaluate.js";
 import { addResult, uid } from "../lib/storage.js";
-
-function cleanModelQuestion(raw) {
-  const cleaned = String(raw || "")
-    .replace(/^["'“”\s]+/, "")
-    .replace(/["'“”\s]+$/, "")
-    .replace(/^(面试官|问题|下一题|追问|好的|好)[:：]?\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const line = cleaned.split(/\n{2,}/)[0] || cleaned;
-  return line.slice(0, 260);
-}
+import useCamera from "../hooks/useCamera.js";
+import useTts from "../hooks/useTts.js";
+import useAnswerBuffer from "../hooks/useAnswerBuffer.js";
+import useSpeechRecognition, { getSpeechRecognitionCtor } from "../hooks/useSpeechRecognition.js";
 
 export default function InterviewView({ settings, onFinish, onExit }) {
   const [phase, setPhase] = useState("starting");
@@ -45,16 +36,10 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [liveAnswer, setLiveAnswer] = useState("");
   const [textAnswer, setTextAnswer] = useState("");
-  const [speechAvailable, setSpeechAvailable] = useState(
-    Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
-  );
+  const [speechAvailable] = useState(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
   const [speechError, setSpeechError] = useState("");
-  const [cameraOn, setCameraOn] = useState(false);
-  const [cameraStarting, setCameraStarting] = useState(false);
-  const [cameraError, setCameraError] = useState("");
   const [micCheck, setMicCheck] = useState("idle");
   const [micCheckMsg, setMicCheckMsg] = useState("");
-  const [listening, setListening] = useState(false);
   const [bufferActive, setBufferActive] = useState(false);
   const [bufferSeconds, setBufferSeconds] = useState(0);
   const [pauseCount, setPauseCount] = useState(0);
@@ -63,12 +48,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const [earlyEnding, setEarlyEnding] = useState(false);
   const [textFallback, setTextFallback] = useState(false);
 
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const cameraBusyRef = useRef(false);
   const submittingRef = useRef(false);
-  const recognitionRef = useRef(null);
-  const listeningRef = useRef(false);
   const phaseRef = useRef("starting");
   const liveRef = useRef("");
   const lastSpeechAtRef = useRef(Date.now());
@@ -79,7 +59,10 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const questionStartRef = useRef(Date.now());
   const sessionStartRef = useRef(Date.now());
   const pauseCountRef = useRef(0);
-  const edgeAudioRef = useRef(null);
+  const bufferActiveRef = useRef(false);
+  const settingsRef = useRef(settings);
+  const submitAnswerRef = useRef(null);
+  settingsRef.current = settings;
 
   const updateHistory = (next) => {
     historyRef.current = next;
@@ -91,7 +74,19 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     setLiveAnswer(value);
   };
 
+  // 同时更新 ref 与 UI 状态，保证定时器读到的是最新值，且定时器本身不必重建。
+  const setBufferState = useCallback((active, seconds = 0) => {
+    bufferActiveRef.current = active;
+    setBufferActive(active);
+    setBufferSeconds(seconds);
+  }, []);
+  // submitAnswer 为函数声明，会提升到组件作用域顶部，这里始终指向最新实现。
+  submitAnswerRef.current = submitAnswer;
+
   const isTextMode = settings.interviewMode === "text" || textFallback;
+  // speak 是 useCallback 缓存的长生命周期函数，用 ref 读取最新的文字模式状态，避免闭包过期。
+  const isTextModeRef = useRef(isTextMode);
+  isTextModeRef.current = isTextMode;
 
   async function startSession() {
     if (settings.cameraOn && !cameraOn && !cameraStarting) startCamera();
@@ -109,211 +104,80 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     await askQuestion({ nextHistory: [], mode: "first", forceText });
   }
 
-  function stopRecognition() {
-    listeningRef.current = false;
-    setListening(false);
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.onresult = null;
-        recognitionRef.current.onend = null;
-        recognitionRef.current.stop();
-      } catch {
-        // already stopped
-      }
-      recognitionRef.current = null;
-    }
+  // 浏览器不支持语音识别时，直接以文字模式开场，避免走一遍注定失败的语音流程。
+  async function startTextInterview() {
+    skipToText();
+    await askQuestion({ nextHistory: [], mode: "first", forceText: true });
   }
 
-  const cancelSpeech = useCallback(() => {
-    if (edgeAudioRef.current) {
-      try {
-        edgeAudioRef.current.pause();
-        edgeAudioRef.current.removeAttribute("src");
-        edgeAudioRef.current.load();
-      } catch {
-        // audio cleanup
-      }
-      edgeAudioRef.current = null;
-    }
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-  }, []);
+  const { speak, cancelSpeech } = useTts({
+    autoSpeak: settings.autoSpeak,
+    voiceName: settings.voiceName,
+    isTextModeRef
+  });
 
-  const speak = useCallback(
-    async (text) => {
-      if (!settings.autoSpeak || isTextMode) {
-        return;
-      }
-      cancelSpeech();
-      const edgeVoiceMap = {
-        XiaoxiaoNeural: "zh-CN-XiaoxiaoNeural",
-        XiaoyiNeural: "zh-CN-XiaoyiNeural",
-        YunxiNeural: "zh-CN-YunxiNeural",
-        YunjianNeural: "zh-CN-YunjianNeural",
-        YunyangNeural: "zh-CN-YunyangNeural"
-      };
-      const voiceKey = settings.voiceName === "auto" ? "XiaoxiaoNeural" : settings.voiceName;
-      const naturalVoice = edgeVoiceMap[voiceKey];
-      if (naturalVoice && !settings.voiceName?.startsWith("system")) {
-        try {
-          const ttsResp = await fetch("/api/edge-tts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              text,
-              voice: naturalVoice,
-              rate: "+5%",
-              pitch: "+0Hz"
-            })
-          });
-          if (ttsResp.ok) {
-            const audioBlob = await ttsResp.blob();
-            const url = URL.createObjectURL(audioBlob);
-            const audio = new Audio(url);
-            edgeAudioRef.current = audio;
-            await new Promise((resolve) => {
-              let done = false;
-              const finish = () => {
-                if (!done) {
-                  done = true;
-                  resolve();
-                }
-              };
-              audio.onended = finish;
-              audio.onerror = finish;
-              audio.play().catch(finish);
-              window.setTimeout(finish, Math.max(3000, text.length * 260 + 3000));
-            });
-            URL.revokeObjectURL(url);
-            edgeAudioRef.current = null;
-            return;
-          }
-        } catch {
-          // fall through to browser speech
-        }
-      }
-      if (!("speechSynthesis" in window)) return;
-      let voices = window.speechSynthesis.getVoices();
-      if (!voices.length) {
-        await new Promise((resolve) => {
-          let settled = false;
-          const done = () => {
-            if (!settled) {
-              settled = true;
-              resolve();
-            }
-          };
-          window.speechSynthesis.onvoiceschanged = done;
-          window.setTimeout(done, 1400);
+  const {
+    cameraOn,
+    cameraStarting,
+    cameraError,
+    videoRef,
+    startCamera,
+    stopCameraStream,
+    toggleCamera
+  } = useCamera();
+
+  const handleRecognitionResult = useCallback(
+    ({ finals, interim }) => {
+      finals.forEach((transcript) => {
+        setLive((prev) => {
+          const next = `${prev}${transcript}`;
+          liveRef.current = next;
+          return next;
         });
-        voices = window.speechSynthesis.getVoices();
-      }
-
-      const zhVoices = voices.filter((voice) => voice.lang && voice.lang.toLowerCase().startsWith("zh"));
-      const preferredNames = [
-        "zh-CN-XiaoxiaoNeural",
-        "XiaoxiaoNeural",
-        "zh-CN-YunxiNeural",
-        "YunxiNeural",
-        "zh-CN-XiaoyiNeural",
-        "XiaoyiNeural",
-        "zh-CN-YunjianNeural",
-        "YunjianNeural"
-      ];
-      let voice = null;
-      if (settings.voiceName && settings.voiceName !== "auto" && settings.voiceName !== "system") {
-        voice = voices.find((item) => item.name.includes(settings.voiceName)) || null;
-      }
-      if (!voice) {
-        voice =
-          zhVoices.find((item) => preferredNames.some((name) => item.name.includes(name))) ||
-          zhVoices[0] ||
-          null;
-      }
-
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = voice?.lang || "zh-CN";
-      utter.rate = settings.voiceName === "system" ? 1 : 0.98;
-      utter.pitch = 1;
-      if (voice) utter.voice = voice;
-      await new Promise((resolve) => {
-        let done = false;
-        const finish = () => {
-          if (!done) {
-            done = true;
-            resolve();
-          }
-        };
-        utter.onend = finish;
-        utter.onerror = finish;
-        window.speechSynthesis.speak(utter);
-        window.setTimeout(finish, Math.max(2500, Math.min(20000, text.length * 220 + 1800)));
       });
+      if (interim) setLiveAnswer(`${liveRef.current}${interim}`.trim());
+      lastSpeechAtRef.current = Date.now();
+      startedSpeechRef.current = true;
+      setBufferState(false);
     },
-    [cancelSpeech, settings.autoSpeak, settings.voiceName]
+    [setBufferState]
   );
 
-  async function startCamera() {
-    if (cameraBusyRef.current) return;
-    cameraBusyRef.current = true;
-    setCameraStarting(true);
-    setCameraError("");
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setCameraError("当前浏览器不支持摄像头");
-      setCameraStarting(false);
-      cameraBusyRef.current = false;
-      return;
-    }
-    try {
-      stopCameraStream();
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
-        audio: false
-      });
-      streamRef.current = stream;
-      setCameraOn(true);
-      setCameraError("");
-      setCameraStarting(false);
-    } catch (err) {
-      setCameraOn(false);
-      const name = err?.name || "";
-      if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-        setCameraError("摄像头权限被拒绝：请在浏览器地址栏允许摄像头权限后，再点“重试开启摄像头”。");
-      } else if (name === "NotFoundError" || name === "DevicesNotFoundError") {
-        setCameraError("没有检测到可用摄像头；可以插好摄像头后重试，语音面试不受影响。");
-      } else {
-        setCameraError("摄像头暂时无法打开，可稍后点“重试开启摄像头”，或直接继续语音面试。");
-      }
-      setCameraStarting(false);
-    } finally {
-      cameraBusyRef.current = false;
-    }
-  }
+  const handleRecognitionStart = useCallback(() => {
+    startedSpeechRef.current = false;
+    lastSpeechAtRef.current = Date.now();
+  }, []);
 
-  function stopCameraStream() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-  }
+  const {
+    listening,
+    startListening: startRecognition,
+    stopRecognition
+  } = useSpeechRecognition({
+    finishedRef,
+    phaseRef,
+    setPhase,
+    setStatusText,
+    setSpeechError,
+    setTextFallback,
+    cancelSpeech,
+    onResult: handleRecognitionResult,
+    onRecognitionStart: handleRecognitionStart
+  });
 
-  useEffect(() => {
-    if (cameraOn && streamRef.current && videoRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
-    }
-  }, [cameraOn]);
-
-  function toggleCamera() {
-    if (cameraOn) {
-      stopCameraStream();
-      setCameraOn(false);
-      if (videoRef.current) videoRef.current.srcObject = null;
-    } else {
-      startCamera();
-    }
-  }
+  useAnswerBuffer({
+    active: phase === "listening",
+    settingsRef,
+    startedSpeechRef,
+    lastSpeechAtRef,
+    submittingRef,
+    finishedRef,
+    bufferActiveRef,
+    pauseCountRef,
+    setPauseCount,
+    setBufferSeconds,
+    setBufferState,
+    submitAnswerRef
+  });
 
   async function checkMicrophone() {
     setMicCheck("loading");
@@ -330,7 +194,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
       }, 1200);
       setMicCheck("ok");
       setMicCheckMsg("麦克风正常，可以开始语音面试");
-    } catch (err) {
+    } catch {
       setMicCheck("error");
       setMicCheckMsg("麦克风不可用或权限被拒绝，可先点“允许麦克风”再重试");
     }
@@ -341,8 +205,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     phaseRef.current = "thinking";
     setPhase("thinking");
     setStatusText(mode === "first" ? "我先看看你的简历和岗位，给你准备一个合适的开头" : "我听到你刚才的回答了，先想一下接下来怎么问更合适");
-    setBufferActive(false);
-    setBufferSeconds(0);
+    setBufferState(false);
     startedSpeechRef.current = false;
 
     let question;
@@ -398,86 +261,14 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     }
   }
 
-  function handleRecognitionResult(event) {
-    let interim = "";
-    for (let i = event.resultIndex; i < event.results.length; i += 1) {
-      const transcript = event.results[i][0].transcript;
-      if (event.results[i].isFinal) {
-        setLive((prev) => {
-          const next = `${prev}${transcript}`;
-          liveRef.current = next;
-          return next;
-        });
-      } else {
-        interim += transcript;
-      }
-    }
-    if (interim) {
-      setLiveAnswer(`${liveRef.current}${interim}`.trim());
-    }
-    lastSpeechAtRef.current = Date.now();
-    startedSpeechRef.current = true;
-    setBufferActive(false);
-    setBufferSeconds(0);
-  }
-
   function startListening() {
     if (finishedRef.current) return;
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
+    if (!getSpeechRecognitionCtor()) {
       setSpeechError("当前浏览器不支持语音识别，请直接使用文字回答。");
       skipToText();
       return;
     }
-    cancelSpeech();
-    setSpeechError("");
-    startedSpeechRef.current = false;
-    lastSpeechAtRef.current = Date.now();
-    const recognition = new SR();
-    recognitionRef.current = recognition;
-    recognition.lang = "zh-CN";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = handleRecognitionResult;
-    recognition.onerror = (event) => {
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        setTextFallback(true);
-        setSpeechError("麦克风未授权或不可用，已切换到文字回答。");
-        setListening(false);
-        listeningRef.current = false;
-        phaseRef.current = "texting";
-        setPhase("texting");
-      } else if (event.error === "no-speech") {
-        // no speech is handled by the buffer timer; keep waiting
-      } else if (event.error === "network") {
-        setSpeechError("语音识别网络异常，可继续说话或改用文字。");
-      }
-    };
-    recognition.onend = () => {
-      if (listeningRef.current && phaseRef.current === "listening" && !finishedRef.current) {
-        try {
-          recognition.start();
-        } catch {
-          // restart failure; UI can fall back to text
-        }
-      }
-    };
-
-    listeningRef.current = true;
-    phaseRef.current = "listening";
-    setPhase("listening");
-    setListening(true);
-    setStatusText("我在听，你按自己的节奏说，中间停顿没关系");
-    try {
-      recognition.start();
-    } catch {
-      setTextFallback(true);
-      setSpeechError("语音识别启动失败，请使用文字回答。");
-      phaseRef.current = "texting";
-      setPhase("texting");
-    }
+    startRecognition();
   }
 
   function skipToText() {
@@ -524,7 +315,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     setLive("");
     setTextAnswer("");
     liveRef.current = "";
-    setBufferActive(false);
+    setBufferState(false);
 
     if (nextHistory.length >= settings.questionCount) {
       await finishInterview(nextHistory);
@@ -657,39 +448,6 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (phase !== "listening") return undefined;
-    const timer = setInterval(() => {
-      if (submittingRef.current || finishedRef.current) return;
-      if (!startedSpeechRef.current) {
-        const waiting = Math.floor((Date.now() - lastSpeechAtRef.current) / 1000);
-        if (waiting > 20) {
-          setBufferActive(true);
-          setBufferSeconds(waiting);
-        }
-        return;
-      }
-      const silent = Math.floor((Date.now() - lastSpeechAtRef.current) / 1000);
-      const silenceThreshold = settings.bufferEnabled ? settings.bufferSeconds : 2;
-      if (silent >= silenceThreshold) {
-        if (!bufferActive) {
-          pauseCountRef.current += 1;
-          setPauseCount((count) => count + 1);
-        }
-        setBufferActive(true);
-        setBufferSeconds(silent);
-        if (silent >= silenceThreshold + 5) {
-          submitAnswer();
-        }
-      } else {
-        setBufferActive(false);
-        setBufferSeconds(0);
-      }
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [phase, bufferActive, settings.bufferSeconds, settings.bufferEnabled]);
-
-  const canStart = phase === "awaiting" || phase === "texting" || phase === "listening";
   const completedRounds = history.length;
   const currentNumber = Math.min(completedRounds + 1, settings.questionCount);
 
@@ -741,11 +499,25 @@ export default function InterviewView({ settings, onFinish, onExit }) {
               </button>
               {micCheckMsg ? <span className={`device-check-msg ${micCheck}`}>{micCheckMsg}</span> : null}
             </div>
+            {speechAvailable ? null : (
+              <div className="inline-warning">
+                当前浏览器不支持语音识别（Web Speech API），语音面试会自动降级为文字。
+                建议使用最新版 Chrome / Edge；也可以直接在这里改用文字面试。
+              </div>
+            )}
           </div>
-          <button className="primary-btn wide ready-start-btn" onClick={startSession}>
-            <Mic size={18} />
-            点击开始语音面试
-          </button>
+          <div className="ready-actions">
+            <button className="primary-btn wide ready-start-btn" onClick={startSession}>
+              <Mic size={18} />
+              {speechAvailable ? "点击开始语音面试" : "仍然开始（将自动转为文字）"}
+            </button>
+            {speechAvailable ? null : (
+              <button className="outline-btn" onClick={startTextInterview}>
+                <MessageSquareText size={16} />
+                改用文字面试
+              </button>
+            )}
+          </div>
         </section>
       ) : null}
 

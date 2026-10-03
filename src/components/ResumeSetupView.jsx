@@ -11,7 +11,7 @@ import {
   UserRound,
   Video
 } from "lucide-react";
-import { analyzeResumeLocal, profileForPrompt } from "../lib/resume.js";
+import { analyzeResumeLocal } from "../lib/resume.js";
 import { analyzeResumeWithModel } from "../lib/model.js";
 
 const DIRECTIONS = [

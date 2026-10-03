@@ -14,27 +14,7 @@ import {
   Video
 } from "lucide-react";
 import { callModel } from "../lib/model.js";
-
-const MODEL_CATALOG = {
-  OpenAI: ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1"],
-  DeepSeek: ["deepseek-chat", "deepseek-reasoner"],
-  "阿里云百炼 Qwen": ["qwen-turbo", "qwen-plus", "qwen-max"],
-  "智谱 GLM": ["glm-4-flash", "glm-4-air", "glm-4-plus"],
-  Kimi: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"],
-  自定义: []
-};
-
-const PROVIDERS = Object.entries(MODEL_CATALOG).map(([label, models]) => {
-  const baseUrlByLabel = {
-    OpenAI: "https://api.openai.com/v1",
-    DeepSeek: "https://api.deepseek.com",
-    "阿里云百炼 Qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "智谱 GLM": "https://open.bigmodel.cn/api/paas/v4",
-    Kimi: "https://api.moonshot.cn/v1",
-    自定义: ""
-  };
-  return { label, models, baseUrl: baseUrlByLabel[label] };
-});
+import { PROVIDER_OPTIONS as PROVIDERS } from "../lib/providers.js";
 
 function Switch({ checked, onChange, title, desc, icon }) {
   return (

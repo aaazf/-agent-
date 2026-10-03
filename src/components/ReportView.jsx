@@ -8,7 +8,6 @@ import {
   Lightbulb,
   Printer,
   RefreshCcw,
-  Sparkles,
   Target,
   TrendingUp
 } from "lucide-react";

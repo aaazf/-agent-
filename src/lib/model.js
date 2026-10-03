@@ -1,12 +1,7 @@
 import { profileForPrompt } from "./resume.js";
+import { PROVIDERS, MODEL_CATALOG } from "./providers.js";
 
-export const PROVIDERS = [
-  { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-  { label: "DeepSeek", baseUrl: "https://api.deepseek.com", model: "deepseek-chat" },
-  { label: "阿里云百炼 Qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
-  { label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
-  { label: "Kimi", baseUrl: "https://api.moonshot.cn/v1", model: "moonshot-v1-8k" }
-];
+export { PROVIDERS, MODEL_CATALOG };
 
 // 提示词体积上限：避免长简历/长回答把上下文撑爆，也降低注入内容的可乘之机。
 const PROMPT_LIMITS = {
@@ -165,7 +160,7 @@ export function buildAskMessages({ settings, history }) {
   ];
 }
 
-export function normalizeInterviewerDecision(data, settings) {
+export function normalizeInterviewerDecision(data) {
   if (!data || typeof data !== "object") {
     throw new Error("模型没有返回有效决策");
   }
@@ -194,7 +189,7 @@ export async function generateInterviewerDecision({ settings, history }) {
     maxTokens: 1200,
     timeoutMs: 9000
   });
-  return normalizeInterviewerDecision(extractJson(raw), settings);
+  return normalizeInterviewerDecision(extractJson(raw));
 }
 
 export function buildEvaluateMessages({ settings, history }) {

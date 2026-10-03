@@ -786,12 +786,23 @@ textarea:focus {
   min-width: 190px;
 }
 
+.ready-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ready-actions .outline-btn {
+  justify-content: center;
+}
+
 @media (max-width: 720px) {
   .voice-ready-panel {
     grid-template-columns: auto 1fr;
   }
 
-  .ready-start-btn {
+  .ready-actions {
     grid-column: 1 / -1;
     width: 100%;
   }

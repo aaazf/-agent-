@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import {
-  ArrowRight,
   BarChart3,
   ChevronRight,
   Clock3,
@@ -8,7 +7,6 @@ import {
   FileText,
   History,
   Plus,
-  Sparkles,
   Trash2,
   TrendingUp,
   Trophy
@@ -71,7 +69,6 @@ export default function HistoryView({ history, onOpen, onDelete, onNew }) {
   const overallScores = history.map((item) => item.evaluation?.overall || 0);
   const maxOverall = Math.max(...overallScores);
   const minOverall = Math.min(...overallScores);
-  const span = Math.max(1, maxOverall - minOverall);
   const points = overallScores.map((score, index) => {
     const x = 8 + (history.length === 1 ? 50 : (index / (history.length - 1)) * 184);
     const y = 118 - ((score - Math.max(0, minOverall - 5)) / Math.max(1, maxOverall + 5 - Math.max(0, minOverall - 5))) * 100;
