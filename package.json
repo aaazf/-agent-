@@ -10,7 +10,8 @@
     "start": "node server/index.mjs",
     "test": "vitest run",
     "lint": "eslint .",
-    "e2e": "node scripts/e2e/interview.e2e.cjs"
+    "e2e": "node scripts/e2e/interview.e2e.cjs",
+    "preflight": "node scripts/preflight.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",

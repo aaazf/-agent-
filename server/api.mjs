@@ -33,8 +33,12 @@ const EDGE_TTS_PYTHON_CANDIDATES = String(process.env.EDGE_TTS_PYTHON || "python
 
 // 站点托管额度：为空表示"访客必须自带 Key"，社区访客可用 POST /api/llm 时留空 apiKey 走这里。
 const HOSTED_LLM_TOKEN = String(process.env.HOSTED_LLM_TOKEN || process.env.MODELSCOPE_API_TOKEN || "").trim();
-const HOSTED_LLM_BASE_URL = process.env.HOSTED_LLM_BASE_URL || "https://api-inference.modelscope.cn/v1";
-const HOSTED_LLM_MODEL = process.env.HOSTED_LLM_MODEL || "Qwen/Qwen3-8B";
+// 默认上游与默认模型直接取自 providers.js 的模型目录：文档、前端选择器、服务端托管额度
+// 三处共用一个来源，避免上游清单变化时模型名漂移（旧默认 Qwen/Qwen3-8B 已下架，
+// 部署后会直接报"模型不存在"，属于最难自查的一类故障）。
+const MODELSCOPE_CATALOG = MODEL_CATALOG["魔搭 ModelScope"];
+const HOSTED_LLM_BASE_URL = process.env.HOSTED_LLM_BASE_URL || MODELSCOPE_CATALOG.baseUrl;
+const HOSTED_LLM_MODEL = process.env.HOSTED_LLM_MODEL || MODELSCOPE_CATALOG.models[0];
 const HOSTED_LLM_MAX_TOKENS = numberFromEnv("HOSTED_LLM_MAX_TOKENS", 1200);
 const LLM_REQUESTS_PER_MINUTE = numberFromEnv("LLM_REQUESTS_PER_MINUTE", 20);
 const HOSTED_REQUESTS_PER_IP_PER_DAY = numberFromEnv("HOSTED_REQUESTS_PER_IP_PER_DAY", 40);
@@ -490,9 +494,37 @@ async function handleAsr(req, res) {
   }
 }
 
+// 上游模型清单探测：只在显式 /api/health?deep=1 时触发，结果缓存一段时间。
+// 托管模型名和上游清单对不上时，访客拿到的是模型报错而不是降级提示，
+// 这是部署后最难自查的一类故障，所以给部署方留一个可远程调用的深检入口。
+let modelCatalogCache = { at: 0, ids: null };
+
+// 候选清单排序：同名组织的模型排在前面。模型改名多数时候只是换了版本号，
+// 把 Qwen/* 排在 deepseek-ai/* 前面，部署方一眼就能找到该换成哪个。
+function rankModelCandidates(ids, model) {
+  const org = String(model).split("/")[0];
+  const sameOrg = ids.filter((id) => id.startsWith(`${org}/`));
+  const rest = ids.filter((id) => !id.startsWith(`${org}/`));
+  return [...sameOrg, ...rest].slice(0, 30);
+}
+
+async function probeHostedModelIds() {
+  const ttl = numberFromEnv("MODEL_CATALOG_TTL_MS", 5 * 60 * 1000);
+  if (modelCatalogCache.ids && Date.now() - modelCatalogCache.at < ttl) return modelCatalogCache.ids;
+  const res = await fetch(`${String(HOSTED_LLM_BASE_URL).replace(/\/+$/, "")}/models`, {
+    headers: { Authorization: `Bearer ${HOSTED_LLM_TOKEN}` },
+    signal: AbortSignal.timeout(numberFromEnv("MODEL_CATALOG_TIMEOUT_MS", 8000))
+  });
+  if (!res.ok) throw new Error(`上游 /models 返回 ${res.status}`);
+  const data = await res.json();
+  const ids = (data?.data || []).map((item) => String(item?.id || "")).filter(Boolean);
+  modelCatalogCache = { at: Date.now(), ids };
+  return ids;
+}
+
 async function handleHealth(req, res) {
   const tts = await ttsStatus();
-  sendJson(res, 200, {
+  const payload = {
     ok: true,
     tts: { available: tts.available, reason: tts.reason },
     asr: asrStatus(),
@@ -507,7 +539,22 @@ async function handleHealth(req, res) {
       asrPerMinute: ASR_REQUESTS_PER_MINUTE,
       asrPerDay: ASR_REQUESTS_PER_DAY
     }
-  });
+  };
+  // 默认不发起外部请求，保持 /api/health 轻快；只有显式 ?deep=1 才去核对上游清单。
+  const deep = /(?:^|[?&])deep=1(?:&|$)/.test(String(req?.url || ""));
+  if (deep && HOSTED_LLM_TOKEN) {
+    try {
+      const ids = await probeHostedModelIds();
+      payload.hostedLlm.modelAvailable = ids.includes(HOSTED_LLM_MODEL);
+      if (!payload.hostedLlm.modelAvailable) {
+        payload.hostedLlm.availableModels = rankModelCandidates(ids, HOSTED_LLM_MODEL);
+      }
+    } catch (err) {
+      payload.hostedLlm.modelAvailable = null;
+      payload.hostedLlm.probeError = err?.message || String(err);
+    }
+  }
+  sendJson(res, 200, payload);
 }
 
 export function createApiHandlers() {

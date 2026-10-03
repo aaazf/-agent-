@@ -49,7 +49,7 @@ git push modelscope main
 | --- | --- | --- |
 | `HOSTED_LLM_TOKEN` | 建议 | 站点托管额度用的 Key（魔搭 API-Inference 令牌）。为空则访客必须自带 Key |
 | `HOSTED_LLM_BASE_URL` | 否 | 默认 `https://api-inference.modelscope.cn/v1` |
-| `HOSTED_LLM_MODEL` | 否 | 默认 `Qwen/Qwen3-8B`，托管额度强制使用该模型，避免访客指定贵模型 |
+| `HOSTED_LLM_MODEL` | 否 | 默认取自 `src/lib/providers.js` 的 `魔搭 ModelScope.models[0]`（当前 `Qwen/Qwen3.5-35B-A3B`）。托管额度强制使用该模型，避免访客指定贵模型。**魔搭模型会上下架，部署后务必用 `npm run preflight` 核对一次** |
 | `HOSTED_REQUESTS_PER_IP_PER_DAY` | 否 | 默认 40，单访客每日托管调用上限 |
 | `HOSTED_REQUESTS_PER_DAY` | 否 | 默认 800，全局每日兜底（真正的成本闸门） |
 | `LLM_REQUESTS_PER_MINUTE` | 否 | 默认 20，单 IP 每分钟限流 |
@@ -67,8 +67,31 @@ ASR 上游的契约很小：`POST {ASR_BASE_URL}/audio/transcriptions`，`multip
 
 ## 5. 部署后自检
 
+推荐直接跑自检脚本，它会把"创空间能不能给社区用"的关键项一次过完，退出码非 0 就代表有必须修的项：
+
 ```bash
-curl -s -X POST https://<你的创空间域名>/api/health
+npm run preflight -- https://<你的创空间域名>
+```
+
+期望输出（`WARN` 都有降级路径，不阻断部署）：
+
+```text
+  [PASS] 接口存活：/api/health 返回 ok
+  [PASS] 共享额度：已开启，单访客每日 40 次，模型 Qwen/Qwen3.5-35B-A3B
+  [PASS] 托管模型：Qwen/Qwen3.5-35B-A3B 在上游清单中
+  [PASS] 语音播报：Edge TTS 可用
+  [PASS] 语音识别：服务端识别已启用（FunAudioLLM/SenseVoiceSmall），访客无需自带 Key
+  [PASS] 成本闸门：{"maxBodyBytes":12582912,"llmPerMinute":20,"asrPerMinute":20,"asrPerDay":600}
+  [PASS] 静态页面：GET / 返回 200
+  [PASS] 页面挂载点：index.html 含 #root
+  [PASS] 前端产物：已引用打包后的 JS
+==== 9 PASS / 0 WARN / 0 FAIL ====
+```
+
+只想看服务端能力时，也可以直接读 `/api/health`（加 `?deep=1` 会额外核对一次上游模型清单）：
+
+```bash
+curl -s -X POST "https://<你的创空间域名>/api/health?deep=1"
 ```
 
 期望返回：
@@ -78,7 +101,12 @@ curl -s -X POST https://<你的创空间域名>/api/health
   "ok": true,
   "tts": { "available": true, "reason": "" },
   "asr": { "available": true, "model": "FunAudioLLM/SenseVoiceSmall", "reason": "" },
-  "hostedLlm": { "enabled": true, "model": "Qwen/Qwen3-8B", "perIpPerDay": 40 },
+  "hostedLlm": {
+    "enabled": true,
+    "model": "Qwen/Qwen3.5-35B-A3B",
+    "perIpPerDay": 40,
+    "modelAvailable": true
+  },
   "limits": { "maxBodyBytes": 12582912, "llmPerMinute": 20, "asrPerMinute": 20, "asrPerDay": 600 }
 }
 ```
@@ -86,6 +114,7 @@ curl -s -X POST https://<你的创空间域名>/api/health
 - `tts.available=false`：容器内没有可用的 `python3 + edge-tts`，语音播报会自动降级为浏览器内置 TTS，不影响流程。
 - `hostedLlm.enabled=false`：没配托管 Key，访客需自带 Key 才能用模型提问（否则走本地题库）。
 - `asr.available=false`：`reason` 会说明缺哪个变量；此时语音作答自动退回浏览器识别或文字作答。
+- `hostedLlm.modelAvailable=false`：**必须处理**——配置的托管模型已不在上游清单里，访客会直接看到模型报错。响应里会带上 `availableModels`（同组织模型排在前面），换成其中一个即可；也可以直接 `HOSTED_LLM_MODEL=<在架模型>` 覆盖。
 
 浏览器端建议再走一遍：登录 → 模型接入 → 简历分析 → 设备预检 → 文字面试 → 复盘报告。有 Chrome 的机器可以直接跑：
 

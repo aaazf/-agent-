@@ -51,7 +51,7 @@ describe("fetchHealth / hasHostedQuota", () => {
   });
 
   it("reports an enabled hosted quota and caches the health call", async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, hostedLlm: { enabled: true, model: "Qwen/Qwen3-8B" } }) }));
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, hostedLlm: { enabled: true, model: "Qwen/Qwen3.5-35B-A3B" } }) }));
     vi.stubGlobal("fetch", fetchMock);
     const mod = await import("../src/lib/runtime.js");
     await expect(mod.hasHostedQuota()).resolves.toBe(true);

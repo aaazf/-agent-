@@ -22,9 +22,12 @@ export const MODEL_CATALOG = {
     models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
   },
   // 魔搭 ModelScope 的 OpenAI 兼容推理接口；模型名是「组织/模型」形式，也可手填其它已上架的模型。
+  // 这里只放当前在架、且适合"出题 + 追问 + 评分"的文本模型；清单会变，
+  // 上线前用 `npm run preflight` 或 GET https://api-inference.modelscope.cn/v1/models 核对。
+  // models[0] 同时是服务端托管额度的默认模型（见 server/api.mjs）。
   "魔搭 ModelScope": {
     baseUrl: "https://api-inference.modelscope.cn/v1",
-    models: ["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]
+    models: ["Qwen/Qwen3.5-35B-A3B", "Qwen/Qwen3.5-27B", "Qwen/Qwen3.5-122B-A10B", "Qwen/Qwen3.8-Flash-Next"]
   },
   自定义: {
     baseUrl: "",

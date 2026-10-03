@@ -37,7 +37,18 @@ docker run --rm -p 7860:7860 interview-agent
 | `npm start` | 生产模式：独立 Node 服务托管 `dist/` 与 `/api/*` |
 | `npm test` | 运行 Vitest 单元测试（lib 纯函数 + 自定义 hooks） |
 | `npm run e2e` | 真实 Chrome 端到端验证（需先 `npm start`，且需要 puppeteer） |
+| `npm run preflight` | 部署自检：核对共享额度、托管模型是否还在上游清单、语音能力与前端产物 |
 | `npm run lint` | 运行 ESLint 检查 |
+
+部署前后都建议跑一次自检；其中"托管模型"一项会真的去问一次上游模型清单：
+
+```bash
+npm run build && npm start                  # 另开终端
+npm run preflight                           # 默认检查 http://127.0.0.1:7860
+npm run preflight -- https://<创空间域名>     # 检查已部署的创空间
+```
+
+魔搭的模型会上下架。模型名一旦失效，访客看到的是模型报错而不是降级提示，所以这一项必须过；自检失败时会直接列出当前在架、同组织的候选模型。
 
 `HOST` / `PORT` 环境变量对 `dev`、`preview`、`start` 都生效；默认监听 `127.0.0.1:4173`，`npm start` 默认监听 `0.0.0.0:7860`。
 
@@ -47,7 +58,7 @@ docker run --rm -p 7860:7860 interview-agent
 
 - Base URL，例如 `https://api.openai.com/v1`
 - API Key
-- 模型名，例如 `gpt-4o-mini`、`deepseek-chat`、`qwen-plus`、`Qwen/Qwen3-8B`
+- 模型名，例如 `gpt-4o-mini`、`deepseek-chat`、`qwen-plus`、`Qwen/Qwen3.5-35B-A3B`
 
 请求通过本地 Vite 服务代理，不会直连第三方网页造成 CORS 限制。未填写 Key 或调用失败时自动使用本地题库兜底。
 

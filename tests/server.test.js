@@ -268,7 +268,7 @@ describe("hosted token mode", () => {
   it("injects the server token and pins the hosted model", async () => {
     vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
     vi.stubEnv("HOSTED_LLM_BASE_URL", "https://api-inference.modelscope.cn/v1");
-    vi.stubEnv("HOSTED_LLM_MODEL", "Qwen/Qwen3-8B");
+    vi.stubEnv("HOSTED_LLM_MODEL", "Qwen/Qwen3.5-35B-A3B");
     vi.resetModules();
     const captured = [];
     vi.stubGlobal("fetch", async (url, init) => {
@@ -292,7 +292,70 @@ describe("hosted token mode", () => {
     expect(captured[0].url).toBe("https://api-inference.modelscope.cn/v1/chat/completions");
     expect(captured[0].init.headers.Authorization).toBe("Bearer ms-hosted-token");
     const sent = JSON.parse(captured[0].init.body);
-    expect(sent.model).toBe("Qwen/Qwen3-8B");
+    expect(sent.model).toBe("Qwen/Qwen3.5-35B-A3B");
     expect(sent.max_tokens).toBeLessThanOrEqual(1200);
+  });
+
+  it("托管模型默认值取自 providers.js 的模型目录，避免与前端清单漂移", async () => {
+    vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
+    vi.resetModules();
+    const mod = await import("../server/api.mjs");
+    const { MODEL_CATALOG } = await import("../src/lib/providers.js");
+    const res = createRes();
+    await mod.createApiHandlers()["/api/health"](createReq({}, { url: "/api/health" }), res);
+    const json = JSON.parse(res.body);
+    expect(json.hostedLlm.enabled).toBe(true);
+    expect(json.hostedLlm.model).toBe(MODEL_CATALOG["魔搭 ModelScope"].models[0]);
+  });
+
+  it("不带 deep=1 时不请求上游，保持 /api/health 轻快", async () => {
+    vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
+    vi.resetModules();
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const mod = await import("../server/api.mjs");
+    const res = createRes();
+    await mod.createApiHandlers()["/api/health"](createReq({}, { url: "/api/health" }), res);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(JSON.parse(res.body).hostedLlm.modelAvailable).toBeUndefined();
+  });
+
+  it("deep=1 时核对托管模型是否还在上游清单里", async () => {
+    vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
+    vi.stubEnv("HOSTED_LLM_MODEL", "Qwen/Qwen3.5-35B-A3B");
+    vi.resetModules();
+    const probed = [];
+    vi.stubGlobal("fetch", async (url) => {
+      probed.push(String(url));
+      return { ok: true, status: 200, json: async () => ({ data: [{ id: "Qwen/Qwen3.5-35B-A3B" }] }) };
+    });
+    const mod = await import("../server/api.mjs");
+    const res = createRes();
+    await mod.createApiHandlers()["/api/health"](createReq({}, { url: "/api/health?deep=1" }), res);
+    expect(probed[0]).toBe("https://api-inference.modelscope.cn/v1/models");
+    expect(JSON.parse(res.body).hostedLlm.modelAvailable).toBe(true);
+  });
+
+  it("deep=1 且模型已下架时列出在架候选，同组织模型排在前面", async () => {
+    vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
+    vi.stubEnv("HOSTED_LLM_MODEL", "Qwen/Qwen3-8B");
+    vi.resetModules();
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [{ id: "deepseek-ai/DeepSeek-V4-Pro" }, { id: "ZhipuAI/GLM-4.7-Flash" }, { id: "Qwen/Qwen3.5-27B" }]
+      })
+    }));
+    const mod = await import("../server/api.mjs");
+    const res = createRes();
+    await mod.createApiHandlers()["/api/health"](createReq({}, { url: "/api/health?deep=1" }), res);
+    const json = JSON.parse(res.body);
+    expect(json.hostedLlm.modelAvailable).toBe(false);
+    expect(json.hostedLlm.availableModels).toEqual([
+      "Qwen/Qwen3.5-27B",
+      "deepseek-ai/DeepSeek-V4-Pro",
+      "ZhipuAI/GLM-4.7-Flash"
+    ]);
   });
 });
