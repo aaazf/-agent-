@@ -8,7 +8,14 @@ import { DIMENSIONS, formatTime, secondsLabel } from "../src/lib/storage.js";
 
 describe("providers", () => {
   it("keeps a single source of truth for preset providers", () => {
-    expect(PROVIDERS.map((p) => p.label)).toEqual(["OpenAI", "DeepSeek", "阿里云百炼 Qwen", "智谱 GLM", "Kimi"]);
+    expect(PROVIDERS.map((p) => p.label)).toEqual([
+      "OpenAI",
+      "DeepSeek",
+      "阿里云百炼 Qwen",
+      "智谱 GLM",
+      "Kimi",
+      "魔搭 ModelScope"
+    ]);
     expect(Object.keys(MODEL_CATALOG)).toContain("自定义");
     expect(PROVIDER_OPTIONS).toHaveLength(PROVIDERS.length + 1);
     expect(PROVIDERS.every((p) => p.baseUrl && p.models.length > 0)).toBe(true);

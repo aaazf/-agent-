@@ -21,6 +21,11 @@ export const MODEL_CATALOG = {
     baseUrl: "https://api.moonshot.cn/v1",
     models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
   },
+  // 魔搭 ModelScope 的 OpenAI 兼容推理接口；模型名是「组织/模型」形式，也可手填其它已上架的模型。
+  "魔搭 ModelScope": {
+    baseUrl: "https://api-inference.modelscope.cn/v1",
+    models: ["Qwen/Qwen3-8B", "Qwen/Qwen2.5-7B-Instruct"]
+  },
   自定义: {
     baseUrl: "",
     models: []

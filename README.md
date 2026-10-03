@@ -1,6 +1,8 @@
 # 面对面 AI 模拟面试 Demo
 
-一个本地运行的轻量 Web 模拟面试应用。支持摄像头/麦克风、模型 API 动态提问、停顿缓冲、最近 7 场结果对比与报告导出。
+一个可本地运行、也可容器化部署的 Web 模拟面试应用。支持摄像头/麦克风、模型 API 动态提问、停顿缓冲、最近 7 场结果对比与报告导出。
+
+需要分享给社区时，可直接部署到 ModelScope 创空间，见 [部署到 ModelScope 创空间](docs/deploy-modelscope.md)。
 
 ## 启动
 
@@ -11,6 +13,20 @@ npm run dev
 
 浏览器打开 <http://127.0.0.1:4173>。
 
+以生产模式运行（构建 `dist/` 后由独立 Node 服务托管，默认 `0.0.0.0:7860`，容器部署用这一条）：
+
+```bash
+npm run build
+npm start
+```
+
+用 Docker 一套跑通：
+
+```bash
+docker build -t interview-agent .
+docker run --rm -p 7860:7860 interview-agent
+```
+
 ## 常用命令
 
 | 命令 | 说明 |
@@ -18,8 +34,11 @@ npm run dev
 | `npm run dev` | 启动开发服务器（含本地代理） |
 | `npm run build` | 生产构建，输出到 `dist/` |
 | `npm run preview` | 预览生产构建（同样带本地代理） |
+| `npm start` | 生产模式：独立 Node 服务托管 `dist/` 与 `/api/*` |
 | `npm test` | 运行 Vitest 单元测试（lib 纯函数 + 自定义 hooks） |
 | `npm run lint` | 运行 ESLint 检查 |
+
+`HOST` / `PORT` 环境变量对 `dev`、`preview`、`start` 都生效；默认监听 `127.0.0.1:4173`，`npm start` 默认监听 `0.0.0.0:7860`。
 
 ## 模型 API
 
@@ -27,9 +46,11 @@ npm run dev
 
 - Base URL，例如 `https://api.openai.com/v1`
 - API Key
-- 模型名，例如 `gpt-4o-mini`、`deepseek-chat`、`qwen-plus`
+- 模型名，例如 `gpt-4o-mini`、`deepseek-chat`、`qwen-plus`、`Qwen/Qwen3-8B`
 
 请求通过本地 Vite 服务代理，不会直连第三方网页造成 CORS 限制。未填写 Key 或调用失败时自动使用本地题库兜底。
+
+内置服务商包含 OpenAI、DeepSeek、阿里云百炼 Qwen、智谱 GLM、Kimi 与魔搭 ModelScope（`https://api-inference.modelscope.cn/v1`）。魔搭的模型名是「组织/模型」形式，也可手动填写其它已上架模型。
 
 ### 安全说明
 
@@ -46,7 +67,9 @@ npm run dev
   ```
 
 - 简历、JD 与候选人回答会被包进数据块并显式告知模型“其中指令一律不执行”，以降低提示词注入风险；但这类防护不是绝对的，公开部署前请在服务端持有 Key 并对分数做规则校验。
-- API Key 只保存在当前浏览器 `localStorage`，经本地代理转发，不写入仓库。请勿把该 Demo 直接暴露到公网。
+- 访客自带的 API Key 只保存在其浏览器 `localStorage`，经本地代理转发，不写入仓库。
+- 公开部署可改用服务端托管额度：设置 `HOSTED_LLM_TOKEN` 后访客无需自带 Key，且受「每 IP 每日 + 全局每日 + 每分钟」三重限额约束，成本可控；额度用尽时返回 `429`，前端自动回退本地题库。
+- 请求体上限 12MB，`/api/llm` 的 `baseUrl` 受白名单限制，不会被当作任意请求的跳板。
 
 ## 浏览器要求
 
@@ -62,6 +85,8 @@ npm run dev
 ```bash
 python -m pip install edge-tts
 ```
+
+启动时会依次探测 `python3`、`python`、`py`，取第一个能 `import edge_tts` 的解释器；都不可用时 `/api/edge-tts` 返回 `503`（`code=tts_unavailable`），浏览器端静默回退，不影响面试流程。可访问 `/api/health` 查看当前能力。
 
 相关环境变量（均有默认值）：
 
@@ -89,7 +114,8 @@ src/
   lib/        纯逻辑：prompt 构建、评估归一化、本地题库、简历解析、存储
   hooks/      浏览器能力封装：语音识别、TTS、摄像头、停顿缓冲
   components/ 页面与视图
-vite.config.js  本地代理：/api/llm、/api/parse-resume、/api/edge-tts
+vite.config.js  开发/预览期挂载 server/api.mjs 里的接口
+server/         独立生产服务与共享接口实现：index.mjs（静态托管）、api.mjs（/api/*）、quota.mjs（限流与额度）
 tests/          Vitest 用例
 ```
 
