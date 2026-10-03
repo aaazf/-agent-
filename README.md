@@ -76,6 +76,24 @@ docker run --rm -p 7860:7860 interview-agent
 
 ## 浏览器要求
 
+### 语音识别引擎优先级
+
+面试的语音作答会按下面的顺序自动挑选引擎，无需手动配置：
+
+1. **服务端识别**（推荐）：浏览器录音 → `POST /api/asr` → 部署方配置的 OpenAI 兼容 ASR 上游。访客不需要自带 Key，也不依赖浏览器内置语音服务（Chrome 的 Web Speech 需要访问 Google，国内常不可用）。
+2. **浏览器识别**：服务端未配置时退回 Web Speech API，仅 Chromium 内核可用。
+3. **文字作答**：以上都不可用，或麦克风权限被拒绝（例如内嵌 iframe 未带 `allow="microphone"`）时自动降级。
+
+开启服务端识别（三个变量都齐了才生效）：
+
+```bash
+ASR_BASE_URL=https://<OpenAI 兼容 ASR 服务>/v1
+ASR_MODEL=<模型名>
+ASR_TOKEN=<令牌，可省略并复用 HOSTED_LLM_TOKEN>
+```
+
+`/api/health` 的 `asr.available` 可以确认是否生效。语音模式下界面会显示“上一题识别结果”，方便候选人确认被识别成了什么。
+
 - **语音面试**依赖浏览器 Web Speech API，目前只有 Chromium 内核支持：请使用最新版 **Chrome / Edge**。
 - 其它浏览器（Firefox / Safari）无法语音识别，界面会提示并自动降级为文字面试，功能不受影响。
 - 文字面试在所有现代浏览器均可用。

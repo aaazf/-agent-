@@ -21,8 +21,11 @@
 | 顶层窗口（新窗口打开） | 伪麦克风 `getUserMedia` 成功；`SpeechRecognition` 能真实启动（`onstart` 触发，未被权限拒绝） |
 | 创空间式内嵌 + 父页未授权 | 浏览器直接返回 `NotAllowedError`；页面显示内嵌提示条；**文字面试仍能从第 1 题完整推进到第 2 题** |
 | 内嵌 + 父页写了 `allow="microphone; camera"` | 麦克风 `granted`，语音识别同样能启动 —— 说明只要宿主页配合，内嵌也可用语音 |
+| 服务端语音识别全链路 | 伪麦克风真实录音（约 48KB）→ `/api/asr` → 上游 multipart → 转写文字 → 面试推进到第 2 题，且页面显示"上一题识别结果" |
 
 所以社区的兜底路径是可靠的；想拿到完整体验，让访客点"在新窗口打开"即可。
+
+**语音识别建议走服务端**：浏览器内置的 Web Speech 需要能访问 Google，国内常不可用，且只有 Chromium 支持。服务端识别（`ASR_*`）让访客不必自带 Key，也不再受浏览器限制。
 
 ## 3. 创建创空间
 
@@ -49,8 +52,15 @@ git push modelscope main
 | `HOSTED_REQUESTS_PER_IP_PER_DAY` | 否 | 默认 40，单访客每日托管调用上限 |
 | `HOSTED_REQUESTS_PER_DAY` | 否 | 默认 800，全局每日兜底（真正的成本闸门） |
 | `LLM_REQUESTS_PER_MINUTE` | 否 | 默认 20，单 IP 每分钟限流 |
+| `ASR_BASE_URL` | 建议 | OpenAI 兼容的 ASR 上游，例如 `https://api.siliconflow.cn/v1`；不填则回落到 `HOSTED_LLM_BASE_URL` |
+| `ASR_MODEL` | 建议 | ASR 模型名，例如 `FunAudioLLM/SenseVoiceSmall`。与 Base URL、Token 三者齐备才生效 |
+| `ASR_TOKEN` | 否 | 不填则复用 `HOSTED_LLM_TOKEN`（同一令牌同时用于 LLM 与 ASR） |
+| `ASR_REQUESTS_PER_DAY` | 否 | 默认 600，全局每日语音识别次数上限（成本闸门） |
+| `ASR_REQUESTS_PER_MINUTE` | 否 | 默认 20，单 IP 每分钟语音识别限流 |
 | `ALLOWED_FRAME_ANCESTORS` | 否 | 默认 `*`（任意 http/https 站点可内嵌）；收紧示例 `https://modelscope.cn` |
 | `EDGE_TTS_PYTHON` | 否 | 容器内已设为 `python3`，通常不用改 |
+
+ASR 上游的契约很小：`POST {ASR_BASE_URL}/audio/transcriptions`，`multipart/form-data` 带 `file` / `model` / `language`，返回 `{"text": "..."}`。满足这个契约的服务都能直接接，换供应商只改这三个变量。没配置时 `/api/asr` 返回 `503 asr_unavailable`，前端自动退回浏览器识别或文字作答。
 
 配了 `HOSTED_LLM_TOKEN` 之后，访客在"模型接入"页会看到"本站已开启共享体验额度"，**API Key 留空即可直接开始面试**；额度用尽时接口返回 `429`（`code=hosted_quota_exceeded`），前端提示填写自己的 Key 并自动回退本地题库，不会白屏。
 

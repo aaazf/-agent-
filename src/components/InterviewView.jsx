@@ -28,6 +28,9 @@ import useCamera from "../hooks/useCamera.js";
 import useTts from "../hooks/useTts.js";
 import useAnswerBuffer from "../hooks/useAnswerBuffer.js";
 import useSpeechRecognition, { getSpeechRecognitionCtor } from "../hooks/useSpeechRecognition.js";
+import useVoiceRecorder, { isVoiceRecordingSupported } from "../hooks/useVoiceRecorder.js";
+import { transcribeAudio } from "../lib/asr.js";
+import { asrCapability } from "../lib/runtime.js";
 
 export default function InterviewView({ settings, onFinish, onExit }) {
   const [phase, setPhase] = useState("starting");
@@ -37,6 +40,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const [liveAnswer, setLiveAnswer] = useState("");
   const [textAnswer, setTextAnswer] = useState("");
   const [speechAvailable] = useState(Boolean(getSpeechRecognitionCtor()));
+  const [voiceEngine, setVoiceEngine] = useState(null);
   const [speechError, setSpeechError] = useState("");
   const [micCheck, setMicCheck] = useState("idle");
   const [micCheckMsg, setMicCheckMsg] = useState("");
@@ -62,6 +66,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const bufferActiveRef = useRef(false);
   const settingsRef = useRef(settings);
   const submitAnswerRef = useRef(null);
+  const voiceEngineRef = useRef(null);
+  const voiceActiveRef = useRef(false);
   settingsRef.current = settings;
 
   const updateHistory = (next) => {
@@ -179,6 +185,44 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     submitAnswerRef
   });
 
+  // 录音期间的“是否在说话”判定交给现有的 useAnswerBuffer 计时，避免改动语音面试状态机。
+  const handleVoiceLevel = useCallback((_rms, speaking) => {
+    if (!speaking) return;
+    lastSpeechAtRef.current = Date.now();
+    startedSpeechRef.current = true;
+    if (!voiceActiveRef.current) {
+      voiceActiveRef.current = true;
+      setStatusText("我在听，你按自己的节奏说，中间停顿没关系");
+    }
+  }, []);
+
+  const {
+    recording,
+    recordingRef,
+    start: startRecording,
+    stop: stopRecording,
+    releaseStream
+  } = useVoiceRecorder({ onLevel: handleVoiceLevel });
+
+  // 语音“正在采集”的统一状态：浏览器识别（listening）与服务端录音（recording）共用同一套按钮语义。
+  // 必须放在这两个来源都声明之后，否则会在 TDZ 里读 const。
+  const capturing = listening || recording;
+
+  // 优先服务端识别：不依赖浏览器自带语音服务，创空间里也少了“必须 Chromium”的限制。
+  const resolveVoiceEngine = useCallback(async () => {
+    if (voiceEngineRef.current) return voiceEngineRef.current;
+    let engine = "text";
+    if (isVoiceRecordingSupported()) {
+      const asr = await asrCapability();
+      engine = asr.available ? "server" : getSpeechRecognitionCtor() ? "browser" : "text";
+    } else if (getSpeechRecognitionCtor()) {
+      engine = "browser";
+    }
+    voiceEngineRef.current = engine;
+    setVoiceEngine(engine);
+    return engine;
+  }, []);
+
   async function checkMicrophone() {
     setMicCheck("loading");
     setMicCheckMsg("");
@@ -261,27 +305,62 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     }
   }
 
-  function startListening() {
+  async function startListening() {
     if (finishedRef.current) return;
-    if (!getSpeechRecognitionCtor()) {
-      setSpeechError("当前浏览器不支持语音识别，请直接使用文字回答。");
+    voiceActiveRef.current = false;
+    const engine = await resolveVoiceEngine();
+    if (finishedRef.current) return;
+    if (engine === "server") {
+      setSpeechError("");
+      const result = await startRecording();
+      if (result.ok) return;
+      setSpeechError(`${result.error}，这一场已切换为文字回答。`);
       skipToText();
       return;
     }
-    startRecognition();
+    if (engine === "browser") {
+      startRecognition();
+      return;
+    }
+    setSpeechError("当前环境无法进行语音识别，请直接使用文字回答。");
+    skipToText();
   }
 
   function skipToText() {
     stopRecognition();
+    stopRecording();
+    releaseStream();
     setTextFallback(true);
     phaseRef.current = "texting";
     setPhase("texting");
     setStatusText("文字回答模式，输入后发送即可");
   }
 
+  // 停止录音并把音频交给服务端识别；识别结果写回 liveRef 后，后续流程与浏览器识别完全一致。
+  async function finalizeVoiceAnswer() {
+    if (!recordingRef.current) return "";
+    setStatusText("正在把你刚才的回答转成文字…");
+    const blob = await stopRecording();
+    if (!blob) return "";
+    const text = await transcribeAudio(blob);
+    setLive(liveRef.current ? `${liveRef.current}${text}` : text);
+    return text;
+  }
+
   async function submitAnswer({ skip = false } = {}) {
     if (submittingRef.current) return;
     submittingRef.current = true;
+    if (recordingRef.current && !skip) {
+      try {
+        await finalizeVoiceAnswer();
+      } catch (err) {
+        submittingRef.current = false;
+        setSpeechError(err.message || "语音识别失败");
+        setStatusText("这一题先改用文字回答吧");
+        skipToText();
+        return;
+      }
+    }
     const answer = (liveRef.current || textAnswer).trim();
     if (!answer && !skip) {
       setStatusText("如果还没想好也没关系，可以先要个提示，或输入一点想法再继续。");
@@ -289,6 +368,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
       return;
     }
     stopRecognition();
+    stopRecording();
     cancelSpeech();
     const question = currentQuestionRef.current;
     if (!question) {
@@ -312,9 +392,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     pauseCountRef.current = 0;
     setPauseCount(0);
     updateHistory(nextHistory);
-    setLive("");
     setTextAnswer("");
-    liveRef.current = "";
     setBufferState(false);
 
     if (nextHistory.length >= settings.questionCount) {
@@ -346,6 +424,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     if (finishedRef.current) return;
     finishedRef.current = true;
     stopRecognition();
+    stopRecording();
+    releaseStream();
     cancelSpeech();
     phaseRef.current = "ending";
     setPhase("ending");
@@ -432,6 +512,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   useEffect(() => {
     sessionStartRef.current = Date.now();
     if (settings.cameraOn) startCamera();
+    if (settings.interviewMode !== "text") resolveVoiceEngine();
     if (settings.interviewMode !== "text") {
       phaseRef.current = "ready";
       setPhase("ready");
@@ -442,6 +523,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     return () => {
       finishedRef.current = true;
       stopRecognition();
+      stopRecording();
+      releaseStream();
       cancelSpeech();
       stopCameraStream();
     };
@@ -450,6 +533,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
 
   const completedRounds = history.length;
   const currentNumber = Math.min(completedRounds + 1, settings.questionCount);
+  // 语音面试没有对话记录面板，候选人看不到“被听成了什么”；回显上一题识别结果补上这个信任缺口。
+  const lastRecognizedAnswer = completedRounds ? history[completedRounds - 1].answer : "";
 
   return (
     <div className="view interview-view">
@@ -499,19 +584,25 @@ export default function InterviewView({ settings, onFinish, onExit }) {
               </button>
               {micCheckMsg ? <span className={`device-check-msg ${micCheck}`}>{micCheckMsg}</span> : null}
             </div>
-            {speechAvailable ? null : (
+            {speechAvailable || voiceEngine === "server" ? null : (
               <div className="inline-warning">
                 当前浏览器不支持语音识别（Web Speech API），语音面试会自动降级为文字。
                 建议使用最新版 Chrome / Edge；也可以直接在这里改用文字面试。
               </div>
             )}
+            {voiceEngine === "server" ? (
+              <div className="hint-block">
+                <Mic size={14} />
+                语音识别在服务端完成，不依赖浏览器自带语音服务；说完停顿几秒会自动提交。
+              </div>
+            ) : null}
           </div>
           <div className="ready-actions">
             <button className="primary-btn wide ready-start-btn" onClick={startSession}>
               <Mic size={18} />
-              {speechAvailable ? "点击开始语音面试" : "仍然开始（将自动转为文字）"}
+              {speechAvailable || voiceEngine === "server" ? "点击开始语音面试" : "仍然开始（将自动转为文字）"}
             </button>
-            {speechAvailable ? null : (
+            {speechAvailable || voiceEngine === "server" ? null : (
               <button className="outline-btn" onClick={startTextInterview}>
                 <MessageSquareText size={16} />
                 改用文字面试
@@ -544,6 +635,12 @@ export default function InterviewView({ settings, onFinish, onExit }) {
                 第 {currentNumber} 题 · {currentQuestion.focus}
               </div>
               <p>{currentQuestion.text}</p>
+            </div>
+           ) : null}
+          {recording ? (
+            <div className="hint-block">
+              <AudioLines size={14} />
+              正在录音（服务端识别）：说完停顿几秒会自动提交，也可以点“我说完了”。
             </div>
           ) : null}
           {speechError ? <div className="error-strip">{speechError}</div> : null}
@@ -602,6 +699,15 @@ export default function InterviewView({ settings, onFinish, onExit }) {
               {cameraOn ? <CameraOff size={15} /> : cameraStarting ? <LoaderCircle className="spin" size={15} /> : <Camera size={15} />}
               {cameraOn ? "关闭摄像头" : cameraStarting ? "正在开启…" : cameraError ? "重试开启摄像头" : "开启摄像头"}
             </button>
+            {lastRecognizedAnswer ? (
+              <div className="voice-transcript">
+                <div className="stage-title">
+                  <FileText size={15} />
+                  上一题识别结果
+                </div>
+                <p>{lastRecognizedAnswer}</p>
+              </div>
+            ) : null}
           </section>
         )}
       </div>
@@ -618,7 +724,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
               {bufferActive ? <Clock3 size={17} /> : <Zap size={17} />}
             </div>
             <div className="buffer-copy">
-              <b>{bufferActive ? `不催你 · 我还在听（已停 ${bufferSeconds} 秒）` : listening ? "聆听中 · 停顿会被理解" : "准备好了随时开始"}</b>
+              <b>{bufferActive ? `不催你 · 我还在听（已停 ${bufferSeconds} 秒）` : capturing ? "聆听中 · 停顿会被理解" : "准备好了随时开始"}</b>
               <span>
                 {settings.bufferEnabled
                   ? "如果你已经说完，我会自动识别并准备下一题；想继续补充就直接说，我会继续听。"
@@ -636,14 +742,16 @@ export default function InterviewView({ settings, onFinish, onExit }) {
           <div className="answer-area">
             <label className="transcript-label">
               <span>
-                {isTextMode ? <MessageSquareText size={14} /> : listening ? <MicOff size={14} /> : <Mic size={14} />}
+                {isTextMode ? <MessageSquareText size={14} /> : capturing ? <MicOff size={14} /> : <Mic size={14} />}
                 你的回答
               </span>
               <small>
                 {isTextMode
                   ? "文字输入"
-                  : listening
-                    ? "正在识别…"
+                  : capturing
+                    ? voiceEngine === "server"
+                      ? "正在录音…"
+                      : "正在识别…"
                     : phase === "listening"
                       ? "聆听结束"
                       : "可输入或直接说话"}
@@ -668,7 +776,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
                 }
               }}
             />
-            {!isTextMode && !speechAvailable ? (
+            {!isTextMode && !speechAvailable && voiceEngine !== "server" ? (
               <div className="inline-warning">当前浏览器没有语音识别 API，请使用文字模式。</div>
             ) : null}
           </div>
@@ -689,19 +797,19 @@ export default function InterviewView({ settings, onFinish, onExit }) {
               <>
                 <button
                   className="primary-btn answer-btn"
-                  onClick={listening ? () => submitAnswer() : startListening}
+                  onClick={capturing ? () => submitAnswer() : startListening}
                   disabled={phase === "ending"}
                 >
-                  {listening ? <Check size={19} /> : <Mic size={19} />}
-                  {listening ? "我说完了" : "开始回答"}
+                  {capturing ? <Check size={19} /> : <Mic size={19} />}
+                  {capturing ? "我说完了" : "开始回答"}
                 </button>
-                {listening ? (
+                {capturing ? (
                   <button className="outline-btn" onClick={skipToText}>
                     <FileText size={15} />
                     改用文字
                   </button>
                 ) : null}
-                {!listening && (liveAnswer || textAnswer) ? (
+                {!capturing && (liveAnswer || textAnswer) ? (
                   <button className="outline-btn" onClick={() => submitAnswer()}>
                     <Send size={15} />
                     发送文字

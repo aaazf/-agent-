@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Camera, Check, LoaderCircle, MessageSquareText, Mic, Video } from "lucide-react";
 import { getSpeechRecognitionCtor } from "../hooks/useSpeechRecognition.js";
-import { isEmbedded } from "../lib/runtime.js";
+import { fetchHealth, isEmbedded } from "../lib/runtime.js";
 
 function ModeCard({ mode, current, onChange }) {
   return (
@@ -26,6 +26,17 @@ function ModeCard({ mode, current, onChange }) {
 export default function DeviceSetupPage({ settings, onBack, onNext }) {
   const [form, setForm] = useState({ ...settings });
   const speechSupported = Boolean(getSpeechRecognitionCtor());
+  const [serverAsr, setServerAsr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    fetchHealth().then((health) => {
+      if (alive && health?.asr?.available) setServerAsr(health.asr.model || "服务端识别");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [micState, setMicState] = useState("idle");
   const [cameraState, setCameraState] = useState("idle");
   const [micMsg, setMicMsg] = useState("");
@@ -92,6 +103,12 @@ export default function DeviceSetupPage({ settings, onBack, onNext }) {
           {isEmbedded() ? (
             <div className="inline-warning">
               当前页面被内嵌打开，浏览器可能直接拒绝麦克风/摄像头权限；可靠做法是点页面底部的“在新窗口打开”，或直接使用文字面试。
+            </div>
+          ) : null}
+          {serverAsr ? (
+            <div className="hint-block">
+              <Mic size={14} />
+              服务端语音识别已启用（{serverAsr}）：语音作答不依赖浏览器自带语音服务，内嵌场景更稳。
             </div>
           ) : null}
           <div className="device-check-line">

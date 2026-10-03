@@ -50,6 +50,26 @@ function createRes() {
   return res;
 }
 
+// 音频走原始二进制 body，所以单独造一个请求对象。
+function createBinaryReq(buffer, { contentType = "audio/webm", url = "/api/asr?lang=zh" } = {}) {
+  return {
+    method: "POST",
+    url,
+    headers: { "content-type": contentType },
+    socket: { remoteAddress: "10.0.0.9" },
+    [Symbol.asyncIterator]() {
+      let sent = false;
+      return {
+        next() {
+          if (sent) return Promise.resolve({ done: true, value: undefined });
+          sent = true;
+          return Promise.resolve({ done: false, value: buffer });
+        }
+      };
+    }
+  };
+}
+
 async function callRoute(path, payload, options) {
   const routes = createApiHandlers();
   const res = createRes();
@@ -112,7 +132,7 @@ describe("quota helpers", () => {
 describe("api routes", () => {
   it("registers llm, resume, tts and health endpoints", () => {
     expect(Object.keys(createApiHandlers()).sort()).toEqual(
-      ["/api/edge-tts", "/api/health", "/api/llm", "/api/parse-resume"].sort()
+      ["/api/asr", "/api/edge-tts", "/api/health", "/api/llm", "/api/parse-resume"].sort()
     );
   });
 
@@ -142,6 +162,99 @@ describe("api routes", () => {
     const huge = { apiKey: "sk-x", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", messages: [], padding: "x".repeat(13 * 1024 * 1024) };
     await routes["/api/llm"](createReq(huge), res);
     expect(res.statusCode).toBe(413);
+  });
+});
+
+describe("server side asr", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.stubEnv("ASR_BASE_URL", "");
+    vi.stubEnv("ASR_MODEL", "");
+    vi.stubEnv("ASR_TOKEN", "");
+    vi.resetModules();
+    vi.unstubAllGlobals();
+  });
+
+  it("reports unavailable and refuses work when nothing is configured", async () => {
+    vi.stubEnv("ASR_BASE_URL", "");
+    vi.stubEnv("ASR_MODEL", "");
+    vi.stubEnv("ASR_TOKEN", "");
+    vi.resetModules();
+    const mod = await import("../server/api.mjs");
+    const res = createRes();
+    await mod.createApiHandlers()["/api/asr"](createBinaryReq(Buffer.from("audio-bytes")), res);
+    expect(res.statusCode).toBe(503);
+    expect(JSON.parse(res.body).code).toBe("asr_unavailable");
+    const health = await callRoute("/api/health", {}, { method: "POST" });
+    expect(health.json.asr.available).toBe(false);
+    expect(health.json.asr.reason).toContain("ASR_BASE_URL");
+  });
+
+  it("forwards the audio as multipart to the configured upstream", async () => {
+    vi.stubEnv("ASR_BASE_URL", "https://asr.example.com/v1");
+    vi.stubEnv("ASR_MODEL", "sense-voice");
+    vi.stubEnv("ASR_TOKEN", "asr-token");
+    vi.resetModules();
+    const captured = [];
+    vi.stubGlobal("fetch", async (url, init) => {
+      captured.push({ url, init });
+      return { ok: true, status: 200, statusText: "OK", text: async () => JSON.stringify({ text: "我负责过电商中台项目" }) };
+    });
+    const mod = await import("../server/api.mjs");
+    const audio = Buffer.from("fake-webm-audio-bytes");
+    const res = createRes();
+    await mod.createApiHandlers()["/api/asr"](createBinaryReq(audio, { contentType: "audio/webm" }), res);
+
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ text: "我负责过电商中台项目", engine: "server" });
+    expect(captured).toHaveLength(1);
+    expect(captured[0].url).toBe("https://asr.example.com/v1/audio/transcriptions");
+    expect(captured[0].init.headers.Authorization).toBe("Bearer asr-token");
+    const form = captured[0].init.body;
+    expect(form).toBeInstanceOf(FormData);
+    expect(form.get("model")).toBe("sense-voice");
+    expect(form.get("language")).toBe("zh");
+    const file = form.get("file");
+    expect(file.size).toBe(audio.length);
+    expect(file.type).toBe("audio/webm");
+  });
+
+  it("rejects non audio payloads and oversized audio", async () => {
+    vi.stubEnv("ASR_BASE_URL", "https://asr.example.com/v1");
+    vi.stubEnv("ASR_MODEL", "sense-voice");
+    vi.stubEnv("ASR_TOKEN", "asr-token");
+    vi.resetModules();
+    vi.stubGlobal("fetch", async () => ({ ok: true, status: 200, statusText: "OK", text: async () => '{"text":"x"}' }));
+    const mod = await import("../server/api.mjs");
+    const routes = mod.createApiHandlers();
+
+    const bad = createRes();
+    await routes["/api/asr"](createBinaryReq(Buffer.from("hi"), { contentType: "application/json" }), bad);
+    expect(bad.statusCode).toBe(415);
+
+    const huge = createRes();
+    await routes["/api/asr"](createBinaryReq(Buffer.alloc(9 * 1024 * 1024)), huge);
+    expect(huge.statusCode).toBe(413);
+  });
+
+  it("surfaces upstream failures as a readable error", async () => {
+    vi.stubEnv("ASR_BASE_URL", "https://asr.example.com/v1");
+    vi.stubEnv("ASR_MODEL", "sense-voice");
+    vi.stubEnv("ASR_TOKEN", "asr-token");
+    vi.resetModules();
+    vi.stubGlobal("fetch", async () => ({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+      text: async () => JSON.stringify({ error: { message: "invalid token" } })
+    }));
+    const mod = await import("../server/api.mjs");
+    const res = createRes();
+    await mod.createApiHandlers()["/api/asr"](createBinaryReq(Buffer.from("audio")), res);
+    expect(res.statusCode).toBe(502);
+    const body = JSON.parse(res.body);
+    expect(body.code).toBe("asr_upstream_error");
+    expect(body.error).toContain("invalid token");
   });
 });
 

@@ -30,3 +30,11 @@ export async function hasHostedQuota() {
   const health = await fetchHealth();
   return Boolean(health?.hostedLlm?.enabled);
 }
+
+// 服务端语音识别能力（部署方配置 ASR_* 后可用，访客不需要自带 Key）。
+export async function asrCapability() {
+  const health = await fetchHealth();
+  const asr = health?.asr;
+  if (!asr) return { available: false, model: "", reason: "未探测到服务端语音识别能力" };
+  return { available: Boolean(asr.available), model: asr.model || "", reason: asr.reason || "" };
+}

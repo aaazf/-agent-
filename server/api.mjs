@@ -9,6 +9,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MODEL_CATALOG } from "../src/lib/providers.js";
+import { ASR_CONFIG, asrStatus, transcribeAudio } from "./asr.mjs";
 import { loadDotEnv, projectRoot } from "./env.mjs";
 import { clientKey, createDailyBudget, createSlidingWindowLimiter } from "./quota.mjs";
 
@@ -39,9 +40,13 @@ const LLM_REQUESTS_PER_MINUTE = numberFromEnv("LLM_REQUESTS_PER_MINUTE", 20);
 const HOSTED_REQUESTS_PER_IP_PER_DAY = numberFromEnv("HOSTED_REQUESTS_PER_IP_PER_DAY", 40);
 const HOSTED_REQUESTS_PER_DAY = numberFromEnv("HOSTED_REQUESTS_PER_DAY", 800);
 const TTS_REQUESTS_PER_MINUTE = numberFromEnv("TTS_REQUESTS_PER_MINUTE", 30);
+const ASR_REQUESTS_PER_MINUTE = numberFromEnv("ASR_REQUESTS_PER_MINUTE", 20);
+const ASR_REQUESTS_PER_DAY = numberFromEnv("ASR_REQUESTS_PER_DAY", 600);
 
 const llmLimiter = createSlidingWindowLimiter({ windowMs: 60_000, max: LLM_REQUESTS_PER_MINUTE });
 const ttsLimiter = createSlidingWindowLimiter({ windowMs: 60_000, max: TTS_REQUESTS_PER_MINUTE });
+const asrLimiter = createSlidingWindowLimiter({ windowMs: 60_000, max: ASR_REQUESTS_PER_MINUTE });
+const asrDailyBudget = createDailyBudget({ max: ASR_REQUESTS_PER_DAY });
 const hostedGlobalBudget = createDailyBudget({ max: HOSTED_REQUESTS_PER_DAY });
 const hostedPerIpBudget = createDailyBudget({ max: HOSTED_REQUESTS_PER_IP_PER_DAY });
 
@@ -116,6 +121,20 @@ async function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
   return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
 }
 
+// 音频以原始二进制上传（而不是 multipart），前端只要把 Blob 直接当 body 发过来即可。
+async function readBinaryBody(req, maxBytes) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.length;
+    if (total > maxBytes) {
+      throw new HttpError(413, `音频超过 ${Math.round(maxBytes / 1024 / 1024)}MB 上限`, "payload_too_large");
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 function sendJson(res, statusCode, payload, code) {
   res.statusCode = statusCode;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -128,7 +147,8 @@ function fail(res, err, fallbackStatus, fallbackCode) {
     sendJson(res, err.statusCode, { error: err.message }, err.code);
     return;
   }
-  sendJson(res, fallbackStatus, { error: err.message || String(err) }, fallbackCode);
+  // 上游/底层模块可能自带更精确的 code（如 asr_upstream_error），优先透出便于前端分流。
+  sendJson(res, fallbackStatus, { error: err.message || String(err) }, err.code || fallbackCode);
 }
 
 // ---------- Edge TTS ----------
@@ -438,11 +458,44 @@ async function handleEdgeTts(req, res) {
   }
 }
 
+async function handleAsr(req, res) {
+  try {
+    const status = asrStatus();
+    if (!status.available) {
+      throw new HttpError(503, `服务端未启用语音识别：${status.reason}`, "asr_unavailable");
+    }
+    const limit = asrLimiter.take(clientKey(req));
+    if (!limit.ok) {
+      throw new HttpError(429, "语音识别请求过于频繁，请稍后再试。", "rate_limited");
+    }
+    const budget = asrDailyBudget.take();
+    if (!budget.ok) {
+      throw new HttpError(429, "站点今日语音识别额度已用尽，请改用文字回答。", "asr_quota_exceeded");
+    }
+    const contentType = String(req.headers["content-type"] || "").split(";")[0].trim().toLowerCase() || "audio/webm";
+    if (!contentType.startsWith("audio/") && contentType !== "application/octet-stream") {
+      throw new HttpError(415, `不支持的音频类型：${contentType}`, "unsupported_media_type");
+    }
+    const buffer = await readBinaryBody(req, ASR_CONFIG.maxBytes);
+    let language = ASR_CONFIG.language;
+    try {
+      language = new URL(req.url || "/api/asr", "http://localhost").searchParams.get("lang") || language;
+    } catch {
+      // 参数解析失败时沿用默认语言
+    }
+    const text = await transcribeAudio({ buffer, contentType, language });
+    sendJson(res, 200, { text, engine: "server" });
+  } catch (err) {
+    fail(res, err, 502, "asr_failed");
+  }
+}
+
 async function handleHealth(req, res) {
   const tts = await ttsStatus();
   sendJson(res, 200, {
     ok: true,
     tts: { available: tts.available, reason: tts.reason },
+    asr: asrStatus(),
     hostedLlm: {
       enabled: Boolean(HOSTED_LLM_TOKEN),
       model: HOSTED_LLM_TOKEN ? HOSTED_LLM_MODEL : "",
@@ -457,6 +510,7 @@ export function createApiHandlers() {
     "/api/llm": handleLlm,
     "/api/parse-resume": handleResumeParse,
     "/api/edge-tts": handleEdgeTts,
+    "/api/asr": handleAsr,
     "/api/health": handleHealth
   };
 }
