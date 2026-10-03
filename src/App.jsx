@@ -101,8 +101,15 @@ export default function App() {
     );
   }
 
-  function completeOnboarding() {
+  // 完成引导：标记已走过引导。带 result 时是"边引导边面试"的收尾，
+  // 直接落到复盘报告页——否则首次访客做完第一场只看到工作台上的卡片，
+  // 整场面试唯一的高价值产出（报告）被藏在一次点击之后。
+  function completeOnboarding(result) {
     localStorage.setItem("agent-onboarded", "1");
+    if (result) {
+      handleFinish(result);
+      return;
+    }
     setPage("workbench");
   }
 
@@ -280,12 +287,7 @@ export default function App() {
           {onboardingStep === 4 ? (
             <InterviewView
               settings={settings}
-              onFinish={(result) => {
-                setHistory(loadHistory());
-                setCurrentResult(result);
-                setSummaryTab("report");
-                completeOnboarding();
-              }}
+              onFinish={(result) => completeOnboarding(result)}
               onExit={() => setOnboardingStep(3)}
             />
           ) : null}

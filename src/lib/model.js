@@ -41,9 +41,18 @@ function untrustedBlock(label, text, max) {
   ].join("\n");
 }
 
+// 能否调用模型：自带 Key 或站点共享额度，二者之一即可。判断必须收敛在这一处——
+// 之前多个组件直接看 settings.apiKey，导致"用本站共享额度"的访客被当成没配模型，
+// 出题、评分、简历解析整场退回本地规则，托管额度的意义就没了。
+export async function canUseModel(settings) {
+  if (settings?.modelEnabled === false) return false;
+  if (settings?.apiKey?.trim()) return true;
+  return hasHostedQuota();
+}
+
 export async function callModel({ settings, messages, maxTokens = 1200, timeoutMs = 20000 }) {
   // 站点提供共享额度时，访客不填 Key 也可以先试；否则提前失败，避免每题都白跑一次请求。
-  if (!settings?.apiKey?.trim() && !(await hasHostedQuota())) {
+  if (!(await canUseModel(settings))) {
     throw new Error("未配置 API Key");
   }
   const controller = new AbortController();

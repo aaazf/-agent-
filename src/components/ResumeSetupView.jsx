@@ -13,7 +13,7 @@ import {
   Video
 } from "lucide-react";
 import { analyzeResumeLocal } from "../lib/resume.js";
-import { analyzeResumeWithModel } from "../lib/model.js";
+import { analyzeResumeWithModel, canUseModel } from "../lib/model.js";
 
 const DIRECTIONS = [
   "互联网",
@@ -112,7 +112,8 @@ export default function ResumeSetupView({
     try {
       const local = analyzeResumeLocal(text);
       let result = local;
-      if (nextSettings?.apiKey?.trim() && nextSettings?.modelName?.trim()) {
+      // 同样交给 canUseModel 判断：自带 Key 或本站共享额度都能走模型。
+      if (await canUseModel(nextSettings)) {
         try {
           result = await analyzeResumeWithModel({ settings: nextSettings, text });
         } catch {

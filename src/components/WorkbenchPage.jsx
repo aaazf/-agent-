@@ -13,9 +13,12 @@ import {
   Sparkles
 } from "lucide-react";
 import { formatTime } from "../lib/storage.js";
+import useHostedQuota, { displayModelName, modelAvailable } from "../hooks/useHostedQuota.js";
 
 export default function WorkbenchPage({ settings, history, onNavigate, onVoiceChange }) {
-  const modelReady = Boolean(settings?.apiKey?.trim());
+  const hosted = useHostedQuota();
+  const modelReady = modelAvailable({ settings, hosted });
+  const modelLabel = displayModelName({ settings, hosted });
   const latest = history[0];
 
   return (
@@ -85,8 +88,8 @@ export default function WorkbenchPage({ settings, history, onNavigate, onVoiceCh
           <div className="status-grid">
             <div>
               <span>模型引擎</span>
-              <b>{modelReady ? settings.modelName : "本地题库"}</b>
-              <small>{modelReady ? "已接入" : "建议到模型接入页配置"}</small>
+              <b>{modelReady ? modelLabel : "本地题库"}</b>
+              <small>{modelReady ? (settings?.apiKey?.trim() ? "已接入" : "本站共享额度") : "建议到模型接入页配置"}</small>
             </div>
             <div>
               <span>面试模式</span>

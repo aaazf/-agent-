@@ -21,7 +21,7 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { callModel, generateInterviewerDecision, buildEvaluateMessages, extractJson } from "../lib/model.js";
+import { callModel, canUseModel, generateInterviewerDecision, buildEvaluateMessages, extractJson } from "../lib/model.js";
 import { localQuestion } from "../lib/questions.js";
 import { localEvaluation, normalizeModelEvaluation } from "../lib/evaluate.js";
 import { addResult, loadConsent, saveConsent, uid } from "../lib/storage.js";
@@ -32,6 +32,7 @@ import useSpeechRecognition, { getSpeechRecognitionCtor } from "../hooks/useSpee
 import useVoiceRecorder, { isVoiceRecordingSupported } from "../hooks/useVoiceRecorder.js";
 import { transcribeAudio } from "../lib/asr.js";
 import { asrCapability } from "../lib/runtime.js";
+import useHostedQuota, { displayModelName, modelAvailable } from "../hooks/useHostedQuota.js";
 
 export default function InterviewView({ settings, onFinish, onExit }) {
   const [phase, setPhase] = useState("starting");
@@ -47,6 +48,10 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const [micCheckMsg, setMicCheckMsg] = useState("");
   // 语音作答会在本机之外处理音频，先明确告知再开始；确认状态只存本机。
   const [consent, setConsent] = useState(() => loadConsent());
+  // 站点共享额度：决定出题/评分走不走模型，也决定界面上显示的引擎名。
+  const hosted = useHostedQuota();
+  const hostedRef = useRef(null);
+  hostedRef.current = hosted;
   const [bufferActive, setBufferActive] = useState(false);
   const [bufferSeconds, setBufferSeconds] = useState(0);
   const [pauseCount, setPauseCount] = useState(0);
@@ -256,7 +261,9 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     startedSpeechRef.current = false;
 
     let question;
-    if (!forceLocal && settings.modelEnabled && settings.apiKey.trim()) {
+    // 是否走模型由 canUseModel 统一决定（自带 Key 或本站共享额度），
+    // 不能再看 settings.apiKey：那会让用共享额度的访客整场落到本地题库。
+    if (!forceLocal && (await canUseModel(settings))) {
       try {
         const decision = await generateInterviewerDecision({ settings, history: nextHistory });
         const focusMap = {
@@ -444,7 +451,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     });
 
     let evaluation = fallback;
-    if (settings.modelEnabled && settings.apiKey.trim()) {
+    if (await canUseModel(settings)) {
       try {
         const raw = await callModel({
           settings,
@@ -468,7 +475,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
         resume: settings.resume,
         jd: settings.jd,
         questionCount: settings.questionCount,
-        modelName: settings.apiKey.trim() ? settings.modelName : ""
+        modelName: displayModelName({ settings, hosted: hostedRef.current })
       },
       history: nextHistory,
       evaluation,
@@ -539,6 +546,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   // 语音面试没有对话记录面板，候选人看不到“被听成了什么”；回显上一题识别结果补上这个信任缺口。
   const lastRecognizedAnswer = completedRounds ? history[completedRounds - 1].answer : "";
   const voiceUsable = speechAvailable || voiceEngine === "server";
+  const modelReady = modelAvailable({ settings, hosted });
+  const modelLabel = displayModelName({ settings, hosted }) || "模型";
   // 只在真的会走语音时才拦人；改用文字面试的路径不需要任何确认。
   const needsVoiceConsent = !isTextMode && voiceUsable && !consent.voiceUpload;
 
@@ -562,7 +571,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
           <span>
             进度 {Math.min(completedRounds, settings.questionCount)} / {settings.questionCount}
           </span>
-          <span className="source-badge">{sourceNote || (settings.apiKey ? "模型驱动提问" : "本地题库")}</span>
+          <span className="source-badge">{sourceNote || (modelReady ? "模型驱动提问" : "本地题库")}</span>
         </div>
         <button className="small-btn subtle" onClick={onExit}>
           <X size={15} />
@@ -668,7 +677,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
             <span className="status-pulse" />
             <div>
               <b>{statusText}</b>
-              <small>{sourceNote || (settings.modelEnabled && settings.apiKey ? `提问引擎：${settings.modelName}` : "本地兜底出题")}</small>
+              <small>{sourceNote || (modelReady ? `提问引擎：${modelLabel}` : "本地兜底出题")}</small>
             </div>
           </div>
           {currentQuestion ? (

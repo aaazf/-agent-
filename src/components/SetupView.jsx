@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { DEFAULT_SETTINGS, loadSettings } from "../lib/storage.js";
 import { PROVIDERS, callModel } from "../lib/model.js";
+import useHostedQuota, { displayModelName, modelAvailable } from "../hooks/useHostedQuota.js";
 
 const DIRECTIONS = ["互联网", "电商", "金融", "教育", "企业服务", "医疗", "游戏", "制造业", "其他"];
 const ROLES = [
@@ -77,6 +78,10 @@ export default function SetupView({ onStart, onOpenHistory }) {
   const [testState, setTestState] = useState("idle");
   const [testMsg, setTestMsg] = useState("");
   const [notice, setNotice] = useState("");
+  // 本站共享额度也代表"能用模型"，表单里的引擎摘要不能再只看 API Key。
+  const hosted = useHostedQuota();
+  const modelReady = modelAvailable({ settings: form, hosted });
+  const modelLabel = displayModelName({ settings: form, hosted });
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
   const pickProvider = (provider) => {
@@ -333,7 +338,13 @@ export default function SetupView({ onStart, onOpenHistory }) {
               </div>
               <div>
                 <span>提问引擎</span>
-                <b>{form.modelEnabled && form.apiKey ? `${form.modelProvider} / ${form.modelName}` : "本地题库（未配置 Key）"}</b>
+                <b>
+                  {modelReady
+                    ? form.apiKey
+                      ? `${form.modelProvider} / ${form.modelName}`
+                      : `本站共享额度 / ${modelLabel}`
+                    : "本地题库（未配置 Key）"}
+                </b>
               </div>
               <div>
                 <span>缓冲</span>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText, LoaderCircle, Save, ScanText, UploadCloud } from "lucide-react";
 import { analyzeResumeLocal } from "../lib/resume.js";
-import { analyzeResumeWithModel } from "../lib/model.js";
+import { analyzeResumeWithModel, canUseModel } from "../lib/model.js";
 
 export default function ResumeAnalysisPage({ settings, onSave, onNext }) {
   const [resume, setResume] = useState(settings.resume || "");
@@ -15,16 +15,26 @@ export default function ResumeAnalysisPage({ settings, onSave, onNext }) {
     setStatus("loading");
     const local = analyzeResumeLocal(text);
     let result = local;
-    if (nextSettings.apiKey?.trim() && nextSettings.modelName?.trim()) {
+    let fallbackReason = "";
+    // 走不走模型由 canUseModel 统一决定（自带 Key 或本站共享额度）；
+    // 之前只看 apiKey，导致用共享额度的访客拿不到模型画像，而画像质量决定追问质量。
+    if (await canUseModel(nextSettings)) {
       try {
         result = await analyzeResumeWithModel({ settings: nextSettings, text });
-      } catch {
+      } catch (err) {
         result = local;
+        fallbackReason = err?.message || "";
       }
     }
     setAnalysis(result);
     setStatus("ok");
-    setMsg(result.source === "model" ? "模型已完成简历结构化分析" : "本地规则已完成基础识别");
+    setMsg(
+      result.source === "model"
+        ? "模型已完成简历结构化分析"
+        : fallbackReason
+          ? `本地规则已完成基础识别（${fallbackReason}）`
+          : "本地规则已完成基础识别"
+    );
   }
 
   async function importFile(file) {

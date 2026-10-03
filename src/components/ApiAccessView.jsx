@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowRight,
   AudioLines,
@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { callModel } from "../lib/model.js";
 import { PROVIDER_OPTIONS as PROVIDERS } from "../lib/providers.js";
-import { fetchHealth } from "../lib/runtime.js";
+import useHostedQuota from "../hooks/useHostedQuota.js";
 
 function Switch({ checked, onChange, title, desc, icon }) {
   return (
@@ -52,17 +52,7 @@ export default function ApiAccessView({
   const [testResponse, setTestResponse] = useState("");
   const provider = PROVIDERS.find((item) => item.label === form.modelProvider) || PROVIDERS[0];
   const isCatalogModel = provider.models.includes(form.modelName);
-  const [hostedQuota, setHostedQuota] = useState(null);
-
-  useEffect(() => {
-    let alive = true;
-    fetchHealth().then((health) => {
-      if (alive) setHostedQuota(health?.hostedLlm?.enabled ? health.hostedLlm : false);
-    });
-    return () => {
-      alive = false;
-    };
-  }, []);
+  const hostedQuota = useHostedQuota();
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -325,7 +315,13 @@ export default function ApiAccessView({
             </div>
             <div>
               <span>提问引擎</span>
-              <b>{form.apiKey ? form.modelName : "本地题库"}</b>
+              <b>
+                {form.apiKey
+                  ? form.modelName
+                  : hostedQuota
+                    ? `本站共享额度 / ${hostedQuota.model}`
+                    : "本地题库"}
+              </b>
             </div>
             <div>
               <span>语音</span>
@@ -349,7 +345,7 @@ export default function ApiAccessView({
             {standalone ? "保存模型配置" : "下一步：面试准备"}
             <ArrowRight size={17} />
           </button>
-          {!form.apiKey && !standalone ? (
+          {!form.apiKey && !standalone && !hostedQuota ? (
             <button className="ghost-btn wide" onClick={() => onNext({ ...form })}>
               暂不接入，本地题库继续
             </button>
