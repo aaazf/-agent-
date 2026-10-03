@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ArrowRight, Camera, Check, LoaderCircle, MessageSquareText, Mic, Video } from "lucide-react";
 import { getSpeechRecognitionCtor } from "../hooks/useSpeechRecognition.js";
+import { isEmbedded } from "../lib/runtime.js";
 
 function ModeCard({ mode, current, onChange }) {
   return (
@@ -88,6 +89,11 @@ export default function DeviceSetupPage({ settings, onBack, onNext }) {
               建议使用最新版 Chrome 或 Edge。
             </div>
           )}
+          {isEmbedded() ? (
+            <div className="inline-warning">
+              当前页面被内嵌打开，浏览器可能直接拒绝麦克风/摄像头权限；可靠做法是点页面底部的“在新窗口打开”，或直接使用文字面试。
+            </div>
+          ) : null}
           <div className="device-check-line">
             <button className="outline-btn" onClick={checkMic} disabled={micState === "loading"}>
               {micState === "loading" ? <LoaderCircle className="spin" size={15} /> : micState === "ok" ? <Check size={15} /> : <Mic size={15} />}

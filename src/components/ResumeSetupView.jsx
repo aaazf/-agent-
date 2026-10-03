@@ -7,6 +7,7 @@ import {
   Play,
   RefreshCw,
   ScanText,
+  ShieldCheck,
   UploadCloud,
   UserRound,
   Video
@@ -276,7 +277,7 @@ export default function ResumeSetupView({
               {uploadState === "loading" ? <LoaderCircle className="spin" size={20} /> : <UploadCloud size={20} />}
               <span>
                 <b>{uploadState === "loading" ? "正在解析简历…" : "点击或拖拽导入简历"}</b>
-                <small>{uploadMsg || "文件只在本机解析，解析结果会填入下方文本框，可继续编辑"}</small>
+                <small>{uploadMsg || "文件在本地服务内解析、不落盘，结果会填入下方文本框，可继续编辑"}</small>
               </span>
             </button>
             <input
@@ -302,6 +303,10 @@ export default function ResumeSetupView({
                 placeholder="写清年限、技术栈、主要项目、量化结果"
               />
             </label>
+            <div className="hint-block">
+              <ShieldCheck size={15} />
+              简历内容会作为提问与评分的依据发送给你配置的模型服务；请勿放入身份证号、住址等敏感信息。
+            </div>
           </section>
 
           <section className="panel resume-analysis-card">

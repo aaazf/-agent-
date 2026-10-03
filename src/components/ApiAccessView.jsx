@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowRight,
   AudioLines,
@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { callModel } from "../lib/model.js";
 import { PROVIDER_OPTIONS as PROVIDERS } from "../lib/providers.js";
+import { fetchHealth } from "../lib/runtime.js";
 
 function Switch({ checked, onChange, title, desc, icon }) {
   return (
@@ -51,6 +52,17 @@ export default function ApiAccessView({
   const [testResponse, setTestResponse] = useState("");
   const provider = PROVIDERS.find((item) => item.label === form.modelProvider) || PROVIDERS[0];
   const isCatalogModel = provider.models.includes(form.modelName);
+  const [hostedQuota, setHostedQuota] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetchHealth().then((health) => {
+      if (alive) setHostedQuota(health?.hostedLlm?.enabled ? health.hostedLlm : false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
@@ -84,7 +96,7 @@ export default function ApiAccessView({
   }
 
   function next() {
-    if (!standalone && !allowEmpty && !form.apiKey.trim()) {
+    if (!standalone && !allowEmpty && !form.apiKey.trim() && !hostedQuota) {
       setTestMsg("API Key 不能为空；没有 Key 时可以跳过此页，后续会使用本地题库兜底。");
       setTestState("error");
       return;
@@ -118,6 +130,13 @@ export default function ApiAccessView({
           </span>
         </div>
       </div>
+
+      {hostedQuota ? (
+        <div className="hint-block">
+          <Sparkles size={15} />
+          本站已开启共享体验额度（模型 {hostedQuota.model}，每人每日 {hostedQuota.perIpPerDay} 次），API Key 可以留空直接开始。
+        </div>
+      ) : null}
 
       <div className="api-layout">
         <section className="panel api-main">

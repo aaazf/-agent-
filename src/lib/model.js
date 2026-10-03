@@ -1,5 +1,6 @@
 import { profileForPrompt } from "./resume.js";
 import { PROVIDERS, MODEL_CATALOG } from "./providers.js";
+import { hasHostedQuota } from "./runtime.js";
 
 export { PROVIDERS, MODEL_CATALOG };
 
@@ -41,7 +42,8 @@ function untrustedBlock(label, text, max) {
 }
 
 export async function callModel({ settings, messages, maxTokens = 1200, timeoutMs = 20000 }) {
-  if (!settings?.apiKey?.trim()) {
+  // 站点提供共享额度时，访客不填 Key 也可以先试；否则提前失败，避免每题都白跑一次请求。
+  if (!settings?.apiKey?.trim() && !(await hasHostedQuota())) {
     throw new Error("未配置 API Key");
   }
   const controller = new AbortController();
@@ -66,7 +68,15 @@ export async function callModel({ settings, messages, maxTokens = 1200, timeoutM
   }
   clearTimeout(timer);
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data?.error || `请求失败（${res.status}）`);
+  if (!res.ok) {
+    if (data?.code === "hosted_quota_exceeded") {
+      throw new Error("本站共享体验额度已用完，可在「模型接入」填写自己的 API Key 继续练习。");
+    }
+    if (data?.code === "rate_limited") {
+      throw new Error("请求过于频繁，请稍后再试。");
+    }
+    throw new Error(data?.error || `请求失败（${res.status}）`);
+  }
   if (!data?.text) throw new Error("模型没有返回有效内容");
   return data.text.trim();
 }

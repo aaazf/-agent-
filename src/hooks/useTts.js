@@ -23,6 +23,8 @@ const PREFERRED_VOICES = [
 // isTextModeRef 用 ref 传入，避免 useCallback 闭包读到过期的模式状态。
 export default function useTts({ autoSpeak, voiceName, isTextModeRef }) {
   const edgeAudioRef = useRef(null);
+  // 服务端没有 edge-tts 时永久跳过，被限流时只跳过一小段时间，避免每次播报都白等一次失败请求。
+  const edgeBlockedUntilRef = useRef(0);
 
   const cancelSpeech = useCallback(() => {
     if (edgeAudioRef.current) {
@@ -48,7 +50,8 @@ export default function useTts({ autoSpeak, voiceName, isTextModeRef }) {
       cancelSpeech();
       const voiceKey = voiceName === "auto" ? "XiaoxiaoNeural" : voiceName;
       const naturalVoice = EDGE_VOICE_MAP[voiceKey];
-      if (naturalVoice && !voiceName?.startsWith("system")) {
+      const edgeUsable = Date.now() >= edgeBlockedUntilRef.current;
+      if (naturalVoice && !voiceName?.startsWith("system") && edgeUsable) {
         try {
           const ttsResp = await fetch("/api/edge-tts", {
             method: "POST",
@@ -81,6 +84,10 @@ export default function useTts({ autoSpeak, voiceName, isTextModeRef }) {
             URL.revokeObjectURL(url);
             edgeAudioRef.current = null;
             return;
+          } else if (ttsResp.status === 501 || ttsResp.status === 503) {
+            edgeBlockedUntilRef.current = Number.POSITIVE_INFINITY;
+          } else if (ttsResp.status === 429) {
+            edgeBlockedUntilRef.current = Date.now() + 60_000;
           }
         } catch {
           // fall through to browser speech

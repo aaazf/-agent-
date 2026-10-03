@@ -34,6 +34,9 @@ const MIME_TYPES = {
 };
 
 // frame-ancestors 放开是为了能被创空间页面内嵌；其余按最小权限收敛。
+// 注意：`*` 只匹配 http/https 这类网络来源，不匹配 about:blank / data: 等不透明来源，
+// 所以不建议在透明包装页里做嵌入测试。如需收紧到固定站点，设置 ALLOWED_FRAME_ANCESTORS="https://modelscope.cn"。
+const FRAME_ANCESTORS = process.env.ALLOWED_FRAME_ANCESTORS || "*";
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -44,7 +47,7 @@ const CSP = [
   "font-src 'self' data:",
   "base-uri 'self'",
   "form-action 'self'",
-  "frame-ancestors *"
+  `frame-ancestors ${FRAME_ANCESTORS}`
 ].join("; ");
 
 const SECURITY_HEADERS = {

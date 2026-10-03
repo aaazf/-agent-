@@ -23,5 +23,14 @@ export default [
       "react/react-in-jsx-scope": "off",
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }]
     }
+  },
+  {
+    // 端到端脚本等 CommonJS 工具：宿主侧用 require / process，page.evaluate 回调里用浏览器 API。
+    files: ["**/*.cjs"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "commonjs",
+      globals: { ...globals.node, ...globals.browser }
+    }
   }
 ];

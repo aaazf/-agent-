@@ -36,7 +36,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [liveAnswer, setLiveAnswer] = useState("");
   const [textAnswer, setTextAnswer] = useState("");
-  const [speechAvailable] = useState(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
+  const [speechAvailable] = useState(Boolean(getSpeechRecognitionCtor()));
   const [speechError, setSpeechError] = useState("");
   const [micCheck, setMicCheck] = useState("idle");
   const [micCheckMsg, setMicCheckMsg] = useState("");

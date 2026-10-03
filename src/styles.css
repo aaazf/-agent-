@@ -5840,3 +5840,66 @@ body,
     font-size: 12px;
   }
 }
+
+/* 内嵌（创空间 iframe）场景的提示条 */
+/* 固定定位，避免插入点影响各主题下 flex/grid 布局；深色卡片在任意主题上都可读。 */
+.embed-notice {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: min(760px, calc(100vw - 32px));
+  padding: 10px 12px 10px 14px;
+  border-radius: 12px;
+  background: rgba(20, 26, 32, 0.94);
+  color: #f4f6f8;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.embed-notice > svg {
+  flex: none;
+  opacity: 0.75;
+}
+
+.embed-notice > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.embed-notice small {
+  opacity: 0.72;
+}
+
+.embed-notice .small-btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+.embed-notice-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.6;
+  cursor: pointer;
+}
+
+.embed-notice-close:hover {
+  opacity: 1;
+}

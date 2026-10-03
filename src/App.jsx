@@ -22,6 +22,7 @@ import ApiAccessView from "./components/ApiAccessView.jsx";
 import SplashView from "./components/SplashView.jsx";
 import DeviceSetupPage from "./components/DeviceSetupPage.jsx";
 import ThemePalette from "./components/ThemePalette.jsx";
+import EmbedNotice from "./components/EmbedNotice.jsx";
 import { deleteResult, loadHistory, loadSettings, saveSettings } from "./lib/storage.js";
 
 const NAV_GROUPS = [
@@ -70,27 +71,33 @@ export default function App() {
 
   if (bootStage === "splash") {
     return (
-      <SplashView
-        onEnter={() => {
-          setBootStage("login");
-        }}
-      />
+      <>
+        <SplashView
+          onEnter={() => {
+            setBootStage("login");
+          }}
+        />
+        <EmbedNotice />
+      </>
     );
   }
 
   if (!authed) {
     return (
-      <LoginView
-        onLogin={() => {
-          setAuthed(true);
-          if (localStorage.getItem("agent-onboarded") === "1") {
-            setPage("workbench");
-          } else {
-            setPage("onboarding");
-            setOnboardingStep(1);
-          }
-        }}
-      />
+      <>
+        <LoginView
+          onLogin={() => {
+            setAuthed(true);
+            if (localStorage.getItem("agent-onboarded") === "1") {
+              setPage("workbench");
+            } else {
+              setPage("onboarding");
+              setOnboardingStep(1);
+            }
+          }}
+        />
+        <EmbedNotice />
+      </>
     );
   }
 
@@ -192,6 +199,7 @@ export default function App() {
   if (page === "onboarding") {
     return (
       <div className={`onboarding-shell theme-${currentTheme.key}`}>
+        <EmbedNotice />
         <header className="onboarding-top">
           <div className="onboarding-brand">
             <img src="/logo.png" alt="logo" />
@@ -276,6 +284,7 @@ export default function App() {
 
   return (
     <div className={`guide-shell theme-${currentTheme.key}`}>
+      <EmbedNotice />
       <aside className="guide-sidebar">
         <div className="guide-logo">
           <span className="logo-badge"><Sparkles size={20} /></span>

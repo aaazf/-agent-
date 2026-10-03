@@ -36,6 +36,7 @@ docker run --rm -p 7860:7860 interview-agent
 | `npm run preview` | 预览生产构建（同样带本地代理） |
 | `npm start` | 生产模式：独立 Node 服务托管 `dist/` 与 `/api/*` |
 | `npm test` | 运行 Vitest 单元测试（lib 纯函数 + 自定义 hooks） |
+| `npm run e2e` | 真实 Chrome 端到端验证（需先 `npm start`，且需要 puppeteer） |
 | `npm run lint` | 运行 ESLint 检查 |
 
 `HOST` / `PORT` 环境变量对 `dev`、`preview`、`start` 都生效；默认监听 `127.0.0.1:4173`，`npm start` 默认监听 `0.0.0.0:7860`。
@@ -51,6 +52,8 @@ docker run --rm -p 7860:7860 interview-agent
 请求通过本地 Vite 服务代理，不会直连第三方网页造成 CORS 限制。未填写 Key 或调用失败时自动使用本地题库兜底。
 
 内置服务商包含 OpenAI、DeepSeek、阿里云百炼 Qwen、智谱 GLM、Kimi 与魔搭 ModelScope（`https://api-inference.modelscope.cn/v1`）。魔搭的模型名是「组织/模型」形式，也可手动填写其它已上架模型。
+
+部署方配置了 `HOSTED_LLM_TOKEN` 时，页面会显示「本站已开启共享体验额度」，此时 API Key 可以留空；额度用尽会提示填写自己的 Key，并自动回退本地题库。
 
 ### 安全说明
 
@@ -77,6 +80,8 @@ docker run --rm -p 7860:7860 interview-agent
 - 其它浏览器（Firefox / Safari）无法语音识别，界面会提示并自动降级为文字面试，功能不受影响。
 - 文字面试在所有现代浏览器均可用。
 - 摄像头与麦克风权限需要 `localhost` 或 HTTPS 环境。
+- 页面被创空间等第三方站点**内嵌**时，浏览器会按源站策略拒绝麦克风/摄像头，除非宿主页面的 `iframe` 写了 `allow="microphone; camera"`；此时页面底部会显示提示条并提供「在新窗口打开」，文字面试不受影响。
+- 以上结论由 `npm run e2e` 在真实 Chrome 中验证：顶层窗口语音识别可启动；内嵌未授权时麦克风返回 `NotAllowedError` 但文字面试仍能逐题推进；宿主页授权后内嵌也可用语音。
 
 ## 语音播报（可选）
 
