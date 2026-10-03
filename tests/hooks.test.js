@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import useCamera from "../src/hooks/useCamera.js";
-import useTts from "../src/hooks/useTts.js";
+import useTts, { playbackBudgetMs } from "../src/hooks/useTts.js";
 import useAnswerBuffer from "../src/hooks/useAnswerBuffer.js";
 import useSpeechRecognition, { getSpeechRecognitionCtor } from "../src/hooks/useSpeechRecognition.js";
 
@@ -59,11 +59,21 @@ describe("useTts", () => {
     global.Audio = class {
       constructor() {
         this.play = vi.fn().mockResolvedValue();
+        // 真实浏览器会在播完后触发 ended；mock 里补上，才能验证"等播完再继续"这条路径。
+        window.setTimeout(() => {
+          if (typeof this.onended === "function") this.onended();
+        }, 0);
       }
       removeAttribute() {}
       load() {}
       pause() {}
     };
+  });
+
+  afterEach(() => {
+    // 浏览器 TTS 用例会临时注入这两个全局对象，用完必须摘掉，避免影响后面的 hook。
+    delete global.window.speechSynthesis;
+    delete global.SpeechSynthesisUtterance;
   });
 
   it("uses Edge TTS when available", async () => {
@@ -86,6 +96,53 @@ describe("useTts", () => {
       await textMode.result.current.speak("你好");
     });
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("长题目的播报预算不再被 20 秒硬上限截断", () => {
+    expect(playbackBudgetMs("你好")).toBeGreaterThanOrEqual(4000);
+    // 早先的实现在这里会返回 20000，导致长题念到一半就被判成播报结束。
+    expect(playbackBudgetMs("这是一道很长的面试题".repeat(10))).toBeGreaterThan(20000);
+  });
+
+  it("浏览器 TTS 退回路径等待 onend，不会在仍在播报时提前返回", async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 501 });
+    const spoken = [];
+    let speaking = false;
+    global.window.speechSynthesis = {
+      getVoices: () => [{ name: "zh-CN-XiaoxiaoNeural", lang: "zh-CN" }],
+      speak(utter) {
+        spoken.push(utter);
+        speaking = true;
+        window.setTimeout(() => {
+          speaking = false;
+          if (typeof utter.onend === "function") utter.onend();
+        }, 30);
+      },
+      cancel() {
+        speaking = false;
+      },
+      pause() {},
+      resume() {},
+      paused: false,
+      get speaking() {
+        return speaking;
+      },
+      onvoiceschanged: null
+    };
+    global.SpeechSynthesisUtterance = class {
+      constructor(text) {
+        this.text = text;
+      }
+    };
+
+    const { result } = renderHook(() =>
+      useTts({ autoSpeak: true, voiceName: "auto", isTextModeRef: { current: false } })
+    );
+    await act(async () => {
+      await result.current.speak("请做两分钟的自我介绍");
+    });
+    expect(spoken).toHaveLength(1);
+    expect(spoken[0].text).toBe("请做两分钟的自我介绍");
   });
 });
 
