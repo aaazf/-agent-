@@ -26,6 +26,19 @@ export function evaluateHealth(health) {
   const hosted = health.hostedLlm;
   if (hosted?.enabled) {
     checks.push(check("共享额度", true, `已开启，单访客每日 ${hosted.perIpPerDay} 次，模型 ${hosted.model}`));
+    // 全站额度一旦用尽，所有访客都会被拒；提前给出预警，而不是等投诉。
+    const budget = hosted.dailyBudget;
+    if (budget && budget.max > 0) {
+      const ratio = budget.used / budget.max;
+      checks.push(
+        check(
+          "当日额度余量",
+          ratio < 0.8,
+          `已用 ${budget.used} / ${budget.max}${ratio >= 0.8 ? "，接近上限，建议调大 HOSTED_REQUESTS_PER_DAY 或改用自带 Key" : ""}`,
+          false
+        )
+      );
+    }
     if (hosted.modelAvailable === undefined) {
       checks.push(check("托管模型", true, `未核对上游清单；加 ?deep=1 可核对 ${hosted.model} 是否在架`, false));
     } else if (hosted.modelAvailable === null) {

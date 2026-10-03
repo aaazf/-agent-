@@ -11,7 +11,7 @@ import path from "node:path";
 import { MODEL_CATALOG } from "../src/lib/providers.js";
 import { ASR_CONFIG, asrStatus, transcribeAudio } from "./asr.mjs";
 import { loadDotEnv, projectRoot } from "./env.mjs";
-import { clientKey, createDailyBudget, createSlidingWindowLimiter } from "./quota.mjs";
+import { clientKey, createDailyBudget, createKeyedDailyBudget, createSlidingWindowLimiter } from "./quota.mjs";
 
 loadDotEnv();
 
@@ -52,7 +52,9 @@ const ttsLimiter = createSlidingWindowLimiter({ windowMs: 60_000, max: TTS_REQUE
 const asrLimiter = createSlidingWindowLimiter({ windowMs: 60_000, max: ASR_REQUESTS_PER_MINUTE });
 const asrDailyBudget = createDailyBudget({ max: ASR_REQUESTS_PER_DAY });
 const hostedGlobalBudget = createDailyBudget({ max: HOSTED_REQUESTS_PER_DAY });
-const hostedPerIpBudget = createDailyBudget({ max: HOSTED_REQUESTS_PER_IP_PER_DAY });
+// 必须按访客分别计数：这里原来误用全局计数器，等于全站共用一个"每人每日"额度池，
+// 一个人面完几场就把所有社区访客挡在门外。
+const hostedPerIpBudget = createKeyedDailyBudget({ max: HOSTED_REQUESTS_PER_IP_PER_DAY });
 
 // baseUrl 白名单：默认只允许目录里预置的服务商域名，避免被当成任意请求的跳板（SSRF）。
 const ALLOWED_MODEL_HOSTS = new Set(
@@ -300,7 +302,7 @@ async function handleLlm(req, res) {
       if (!HOSTED_LLM_TOKEN) {
         throw new HttpError(400, "未配置 API Key", "api_key_required");
       }
-      const perIp = hostedPerIpBudget.take();
+      const perIp = hostedPerIpBudget.take(clientKey(req));
       if (!perIp.ok) {
         throw new HttpError(429, "今日免费体验额度已用完，请填写自己的 API Key 继续练习。", "hosted_quota_exceeded");
       }
@@ -531,7 +533,10 @@ async function handleHealth(req, res) {
     hostedLlm: {
       enabled: Boolean(HOSTED_LLM_TOKEN),
       model: HOSTED_LLM_TOKEN ? HOSTED_LLM_MODEL : "",
-      perIpPerDay: HOSTED_LLM_TOKEN ? HOSTED_REQUESTS_PER_IP_PER_DAY : 0
+      perIpPerDay: HOSTED_LLM_TOKEN ? HOSTED_REQUESTS_PER_IP_PER_DAY : 0,
+      // 运营视角：全站额度还剩多少。公开部署最怕"额度悄悄用尽、访客全部被拒"，
+      // 这里只暴露计数，不含任何访客标识。
+      dailyBudget: HOSTED_LLM_TOKEN ? hostedGlobalBudget.snapshot() : null
     },
     limits: {
       maxBodyBytes: MAX_BODY_BYTES,

@@ -50,8 +50,8 @@ git push modelscope main
 | `HOSTED_LLM_TOKEN` | 建议 | 站点托管额度用的 Key（魔搭 API-Inference 令牌）。为空则访客必须自带 Key |
 | `HOSTED_LLM_BASE_URL` | 否 | 默认 `https://api-inference.modelscope.cn/v1` |
 | `HOSTED_LLM_MODEL` | 否 | 默认取自 `src/lib/providers.js` 的 `魔搭 ModelScope.models[0]`（当前 `Qwen/Qwen3.5-35B-A3B`）。托管额度强制使用该模型，避免访客指定贵模型。**魔搭模型会上下架，部署后务必用 `npm run preflight` 核对一次** |
-| `HOSTED_REQUESTS_PER_IP_PER_DAY` | 否 | 默认 40，单访客每日托管调用上限 |
-| `HOSTED_REQUESTS_PER_DAY` | 否 | 默认 800，全局每日兜底（真正的成本闸门） |
+| `HOSTED_REQUESTS_PER_IP_PER_DAY` | 否 | 默认 40，**按访客（IP）分别计数**的每日托管调用上限。一整场 6 题面试约 7 次调用，够一位访客练 5 场左右 |
+| `HOSTED_REQUESTS_PER_DAY` | 否 | 默认 800，全局每日兜底（真正的成本闸门）。注意 `X-Forwarded-For` 可伪造，所以成本最终由它兜住 |
 | `LLM_REQUESTS_PER_MINUTE` | 否 | 默认 20，单 IP 每分钟限流 |
 | `ASR_BASE_URL` | 建议 | OpenAI 兼容的 ASR 上游，例如 `https://api.siliconflow.cn/v1`；不填则回落到 `HOSTED_LLM_BASE_URL` |
 | `ASR_MODEL` | 建议 | ASR 模型名，例如 `FunAudioLLM/SenseVoiceSmall`。与 Base URL、Token 三者齐备才生效 |
@@ -64,6 +64,8 @@ git push modelscope main
 ASR 上游的契约很小：`POST {ASR_BASE_URL}/audio/transcriptions`，`multipart/form-data` 带 `file` / `model` / `language`，返回 `{"text": "..."}`。满足这个契约的服务都能直接接，换供应商只改这三个变量。没配置时 `/api/asr` 返回 `503 asr_unavailable`，前端自动退回浏览器识别或文字作答。
 
 配了 `HOSTED_LLM_TOKEN` 之后，访客在"模型接入"页会看到"本站已开启共享体验额度"，**API Key 留空即可直接开始面试**；额度用尽时接口返回 `429`（`code=hosted_quota_exceeded`），前端提示填写自己的 Key 并自动回退本地题库，不会白屏。
+
+额度按访客隔离：某个访客当天用尽只影响他自己，其他社区访客照常可用。`/api/health` 的 `hostedLlm.dailyBudget` 会给出全站当日用量与上限（例如 `{"max":800,"used":213}`），可以用来判断"是不是该调大额度了"，而不必等访客来投诉。
 
 ## 5. 部署后自检
 
@@ -105,6 +107,7 @@ curl -s -X POST "https://<你的创空间域名>/api/health?deep=1"
     "enabled": true,
     "model": "Qwen/Qwen3.5-35B-A3B",
     "perIpPerDay": 40,
+    "dailyBudget": { "day": "2026-10-04", "used": 213, "max": 800 },
     "modelAvailable": true
   },
   "limits": { "maxBodyBytes": 12582912, "llmPerMinute": 20, "asrPerMinute": 20, "asrPerDay": 600 }

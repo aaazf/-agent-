@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clientKey, createDailyBudget, createSlidingWindowLimiter } from "../server/quota.mjs";
+import { clientKey, createDailyBudget, createKeyedDailyBudget, createSlidingWindowLimiter } from "../server/quota.mjs";
 import { createApiHandlers, resolveUpstreamUrl } from "../server/api.mjs";
 
 function createReq(payload, { headers = {}, method = "POST", url = "/api/llm" } = {}) {
@@ -126,6 +126,30 @@ describe("quota helpers", () => {
   it("prefers the forwarded client address when present", () => {
     expect(clientKey({ headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" }, socket: { remoteAddress: "10.0.0.1" } })).toBe("1.2.3.4");
     expect(clientKey({ headers: {}, socket: { remoteAddress: "10.0.0.1" } })).toBe("10.0.0.1");
+  });
+
+  it("按访客分别计数：一个人刷爆不影响别人（这曾经是全局一个池子）", () => {
+    const budget = createKeyedDailyBudget({ max: 2 });
+    expect(budget.take("1.1.1.1").ok).toBe(true);
+    expect(budget.take("1.1.1.1").ok).toBe(true);
+    expect(budget.take("1.1.1.1").ok).toBe(false);
+    // 另一个访客仍有自己的额度
+    expect(budget.take("2.2.2.2").ok).toBe(true);
+    expect(budget.check("2.2.2.2").remaining).toBe(1);
+    expect(budget.snapshot()).toMatchObject({ max: 2, keys: 2, used: 3 });
+  });
+
+  it("键数量超过上限后不再为新访客记账，避免被伪造 IP 撑爆内存", () => {
+    const budget = createKeyedDailyBudget({ max: 5, maxKeys: 2 });
+    budget.take("a");
+    budget.take("b");
+    expect(budget.take("c").ok).toBe(true);
+    expect(budget.snapshot().keys).toBe(2);
+  });
+
+  it("max=0 视为不限额", () => {
+    const budget = createKeyedDailyBudget({ max: 0 });
+    for (let i = 0; i < 5; i += 1) expect(budget.take("a").ok).toBe(true);
   });
 });
 
@@ -306,6 +330,55 @@ describe("hosted token mode", () => {
     const json = JSON.parse(res.body);
     expect(json.hostedLlm.enabled).toBe(true);
     expect(json.hostedLlm.model).toBe(MODEL_CATALOG["魔搭 ModelScope"].models[0]);
+  });
+
+  it("共享额度按访客隔离：一个 IP 用尽后别的访客照常能用", async () => {
+    vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
+    vi.stubEnv("HOSTED_LLM_BASE_URL", "https://api-inference.modelscope.cn/v1");
+    vi.stubEnv("HOSTED_REQUESTS_PER_IP_PER_DAY", "2");
+    vi.resetModules();
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => JSON.stringify({ choices: [{ message: { content: "你好" } }] })
+    }));
+    const mod = await import("../server/api.mjs");
+    const handlers = mod.createApiHandlers();
+    const call = async (ip) => {
+      const res = createRes();
+      await handlers["/api/llm"](
+        createReq({ messages: [{ role: "user", content: "hi" }] }, { headers: { "x-forwarded-for": ip } }),
+        res
+      );
+      return res;
+    };
+    expect((await call("1.1.1.1")).statusCode).toBe(200);
+    expect((await call("1.1.1.1")).statusCode).toBe(200);
+    const blocked = await call("1.1.1.1");
+    expect(blocked.statusCode).toBe(429);
+    expect(JSON.parse(blocked.body).code).toBe("hosted_quota_exceeded");
+    // 修复前这里也会 429：全站共用一个"每人每日"额度池
+    expect((await call("2.2.2.2")).statusCode).toBe(200);
+  });
+
+  it("health 里带上共享额度的当日用量，避免额度耗尽后才发现", async () => {
+    vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
+    vi.stubEnv("HOSTED_LLM_BASE_URL", "https://api-inference.modelscope.cn/v1");
+    vi.stubEnv("HOSTED_REQUESTS_PER_DAY", "800");
+    vi.resetModules();
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => JSON.stringify({ choices: [{ message: { content: "ok" } }] })
+    }));
+    const mod = await import("../server/api.mjs");
+    const handlers = mod.createApiHandlers();
+    await handlers["/api/llm"](createReq({ messages: [{ role: "user", content: "hi" }] }), createRes());
+    const res = createRes();
+    await handlers["/api/health"](createReq({}, { url: "/api/health" }), res);
+    expect(JSON.parse(res.body).hostedLlm.dailyBudget).toMatchObject({ max: 800, used: 1 });
   });
 
   it("不带 deep=1 时不请求上游，保持 /api/health 轻快", async () => {

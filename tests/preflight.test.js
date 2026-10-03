@@ -5,7 +5,13 @@ const HEALTHY = {
   ok: true,
   tts: { available: true, reason: "" },
   asr: { available: true, model: "FunAudioLLM/SenseVoiceSmall", reason: "" },
-  hostedLlm: { enabled: true, model: "Qwen/Qwen3.5-35B-A3B", perIpPerDay: 40, modelAvailable: true },
+  hostedLlm: {
+    enabled: true,
+    model: "Qwen/Qwen3.5-35B-A3B",
+    perIpPerDay: 40,
+    modelAvailable: true,
+    dailyBudget: { day: "2026-10-04", used: 12, max: 800 }
+  },
   limits: { maxBodyBytes: 12582912, llmPerMinute: 20, asrPerMinute: 20, asrPerDay: 600 }
 };
 
@@ -52,6 +58,21 @@ describe("部署自检", () => {
     const { ok, warnings } = summarize(checks);
     expect(ok).toBe(true);
     expect(warnings.map((item) => item.name)).toEqual(["语音播报", "语音识别"]);
+  });
+
+  it("当日额度接近上限时给出 WARN，但不阻断部署", () => {
+    const checks = evaluateHealth({
+      ...HEALTHY,
+      hostedLlm: { ...HEALTHY.hostedLlm, dailyBudget: { day: "2026-10-04", used: 790, max: 800 } }
+    });
+    const { ok, warnings } = summarize(checks);
+    expect(ok).toBe(true);
+    expect(warnings.map((item) => item.name)).toEqual(["当日额度余量"]);
+  });
+
+  it("额度还算充裕时不产生任何告警", () => {
+    const { warnings } = summarize(evaluateHealth(HEALTHY));
+    expect(warnings).toHaveLength(0);
   });
 
   it("首页不是构建产物时判为必须处理", () => {
