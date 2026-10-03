@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { transcribeAudio } from "../src/lib/asr.js";
+import { ASR_LANG } from "../src/lib/language.js";
 
 function jsonResponse(status, payload) {
   return {
@@ -30,7 +31,8 @@ describe("transcribeAudio", () => {
     await expect(transcribeAudio(blob)).resolves.toBe("我说完了");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("/api/asr?lang=zh");
+    expect(url).toBe(`/api/asr?lang=${ASR_LANG}`);
+    expect(ASR_LANG).toBe("zh");
     expect(init.method).toBe("POST");
     expect(init.headers["Content-Type"]).toBe("audio/webm;codecs=opus");
     expect(init.body).toBe(blob);

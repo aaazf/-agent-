@@ -36,7 +36,7 @@ docker run --rm -p 7860:7860 interview-agent
 | `npm run preview` | 预览生产构建（同样带本地代理） |
 | `npm start` | 生产模式：独立 Node 服务托管 `dist/` 与 `/api/*` |
 | `npm test` | 运行 Vitest 单元测试（lib 纯函数 + 自定义 hooks） |
-| `npm run e2e` | 真实 Chrome 端到端验证（需先 `npm start`，且需要 puppeteer） |
+| `npm run e2e` | 真实 Chrome 端到端验证（需先 `npm run build`；脚本自带桩上游与应用服务器，另需 puppeteer 与 Chrome） |
 | `npm run preflight` | 部署自检：核对共享额度、托管模型是否还在上游清单、语音能力与前端产物 |
 | `npm run lint` | 运行 ESLint 检查 |
 

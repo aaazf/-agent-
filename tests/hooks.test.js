@@ -4,6 +4,7 @@ import useCamera from "../src/hooks/useCamera.js";
 import useTts, { playbackBudgetMs } from "../src/hooks/useTts.js";
 import useAnswerBuffer from "../src/hooks/useAnswerBuffer.js";
 import useSpeechRecognition, { getSpeechRecognitionCtor } from "../src/hooks/useSpeechRecognition.js";
+import { SPEECH_LANG } from "../src/lib/language.js";
 
 function fakeStream() {
   return { getTracks: () => [{ stop: vi.fn() }] };
@@ -211,6 +212,12 @@ describe("useSpeechRecognition", () => {
     expect(hook.result.current.listening).toBe(true);
     expect(callbacks.setPhase).toHaveBeenCalledWith("listening");
     expect(callbacks.onRecognitionStart).toHaveBeenCalled();
+  });
+
+  it("识别语言取自统一常量，不再散落硬编码", () => {
+    const { hook } = setup();
+    act(() => hook.result.current.startListening());
+    expect(instances[0].lang).toBe(SPEECH_LANG);
   });
 
   it("forwards finals and interim transcripts", () => {
