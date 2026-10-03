@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { formatTime } from "../lib/storage.js";
 import useHostedQuota, { displayModelName, modelAvailable } from "../hooks/useHostedQuota.js";
+import { dataFlowCompact } from "../lib/privacy.js";
 
 export default function WorkbenchPage({ settings, history, onNavigate, onVoiceChange }) {
   const hosted = useHostedQuota();
@@ -152,7 +153,7 @@ export default function WorkbenchPage({ settings, history, onNavigate, onVoiceCh
           )}
           <div className="privacy-note">
             <ShieldCheck size={14} />
-            数据仅保存在当前浏览器
+            {dataFlowCompact}
           </div>
         </section>
       </div>

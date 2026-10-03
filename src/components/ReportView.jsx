@@ -8,10 +8,12 @@ import {
   Lightbulb,
   Printer,
   RefreshCcw,
+  ShieldCheck,
   Target,
   TrendingUp
 } from "lucide-react";
 import { DIMENSIONS, formatTime, loadHistory, secondsLabel } from "../lib/storage.js";
+import { dataFlowFull } from "../lib/privacy.js";
 
 function ScoreRing({ value, label, size = 96, tone = "teal" }) {
   const radius = size / 2 - 9;
@@ -270,6 +272,17 @@ export default function ReportView({ result, onBack, onNew }) {
               </div>
             </article>
           ))}
+        </div>
+      </section>
+
+      <section className="panel report-disclaimer">
+        <ShieldCheck size={16} />
+        <div>
+          <b>这份报告怎么来的</b>
+          <p>
+            评分与改进建议由{stats.modelUsed ? "模型" : "本地规则"}根据本场问答生成，只用于练习参考，不代表真实面试结论或录用判断。
+          </p>
+          <p>{dataFlowFull}</p>
         </div>
       </section>
     </div>

@@ -2737,6 +2737,36 @@ textarea:focus {
   font-size: 11px;
 }
 
+/* 报告末尾的说明块：评分口径 + 数据流向，打印时一并带走。 */
+.report-disclaimer {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-top: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.report-disclaimer svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.report-disclaimer b {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink);
+}
+
+.report-disclaimer p {
+  margin: 0 0 4px;
+}
+
+.report-disclaimer p:last-child {
+  margin-bottom: 0;
+}
+
 .resume-analyze-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(340px, 0.9fr);

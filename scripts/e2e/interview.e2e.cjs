@@ -432,6 +432,8 @@ async function runHostedModelInterview(target, prefix, stub) {
   const report = await target.waitForSelector(".report-view", { timeout: 90000 }).then(() => true).catch(() => false);
   if (report) {
     check(`${prefix}5 最后一题收尾后生成报告`, true);
+    const disclaimer = await target.evaluate(() => document.body.innerText.includes("不代表真实面试结论"));
+    check(`${prefix}5b 报告带评分免责与数据流向说明`, disclaimer);
   } else {
     const snapshot = await target.evaluate(() => document.body.innerText.replace(/\s+/g, " ").slice(0, 200));
     const timeline = await target.evaluate(() => {

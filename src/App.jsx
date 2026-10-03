@@ -24,6 +24,7 @@ import DeviceSetupPage from "./components/DeviceSetupPage.jsx";
 import ThemePalette from "./components/ThemePalette.jsx";
 import EmbedNotice from "./components/EmbedNotice.jsx";
 import { DEFAULT_SETTINGS, clearLocalData, deleteResult, loadHistory, loadSettings, saveSettings } from "./lib/storage.js";
+import { dataFlowCompact } from "./lib/privacy.js";
 
 const NAV_GROUPS = [
   {
@@ -361,7 +362,7 @@ export default function App() {
           </button>
           <div>
             <ShieldCheck size={13} />
-            数据仅保存在当前浏览器
+            {dataFlowCompact}
           </div>
           <button className="guide-logout" onClick={() => setAuthed(false)}>
             <LogOut size={14} />

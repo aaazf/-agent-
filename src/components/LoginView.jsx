@@ -13,6 +13,7 @@ import {
   UserRound,
 } from "lucide-react";
 import GalaxyCanvas from "./GalaxyCanvas.jsx";
+import { dataFlowFull } from "../lib/privacy.js";
 
 export default function LoginView({ onLogin }) {
   const [email, setEmail] = useState("demo@interview.local");
@@ -151,7 +152,7 @@ export default function LoginView({ onLogin }) {
 
           <p className="login-note">
             <Sparkles size={13} />
-            面试记录与设置只保存在当前浏览器 localStorage（最多 7 场，可一键清除）；语音作答时的录音会上传到部署方服务器用于识别文字，面试前会再做一次明确告知。
+            {dataFlowFull}
           </p>
         </section>
       </main>

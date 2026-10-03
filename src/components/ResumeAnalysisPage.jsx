@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileText, LoaderCircle, Save, ScanText, UploadCloud } from "lucide-react";
+import { FileText, LoaderCircle, Save, ScanText, ShieldCheck, UploadCloud } from "lucide-react";
 import { analyzeResumeLocal } from "../lib/resume.js";
 import { analyzeResumeWithModel, canUseModel } from "../lib/model.js";
 
@@ -178,6 +178,10 @@ export default function ResumeAnalysisPage({ settings, onSave, onNext }) {
           )}
         </section>
       </div>
+      <p className="privacy-note">
+        <ShieldCheck size={13} />
+        开启模型（含本站共享额度）时，简历文本会发送给模型服务做结构化分析；关闭模型则只在本机按规则解析。
+      </p>
     </div>
   );
 }
