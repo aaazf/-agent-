@@ -2737,6 +2737,34 @@ textarea:focus {
   font-size: 11px;
 }
 
+/* 中场恢复：上一场没面完时，先让用户决定接着面还是重开。 */
+.resume-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+}
+
+.resume-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.resume-panel-title b {
+  display: block;
+}
+
+.resume-panel-title small {
+  color: var(--muted);
+}
+
+.resume-panel p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 /* 报告末尾的说明块：评分口径 + 数据流向，打印时一并带走。 */
 .report-disclaimer {
   display: flex;

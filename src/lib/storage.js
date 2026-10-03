@@ -2,6 +2,7 @@ export const MAX_RESULTS = 7;
 const SETTINGS_KEY = "face-interview-settings-v1";
 const HISTORY_KEY = "face-interview-history-v1";
 const CONSENT_KEY = "face-interview-consent-v1";
+const SESSION_KEY = "face-interview-session-v1";
 // App.jsx 的引导与主题标记同样只存在本机，纳入一键清除，避免"清完了还认得我"。
 const EXTRA_KEYS = ["agent-onboarded", "guide-theme"];
 
@@ -111,7 +112,35 @@ export function saveConsent(patch) {
 // 一键清除本机数据：面试记录、设置、语音告知确认与引导状态都在本机，清掉即回到全新访客。
 export function clearLocalData() {
   try {
-    [SETTINGS_KEY, HISTORY_KEY, CONSENT_KEY, ...EXTRA_KEYS].forEach((key) => localStorage.removeItem(key));
+    [SETTINGS_KEY, HISTORY_KEY, CONSENT_KEY, SESSION_KEY, ...EXTRA_KEYS].forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // local demo only
+  }
+}
+
+// 中场快照：只存"这场面试已经答完的轮次"，用于刷新后接着面完。
+// 面试正常结束或用户明确重开时会清掉，避免陈旧快照一直提示"继续"。
+export function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore corrupted local storage
+  }
+  return null;
+}
+
+export function saveSession(snapshot) {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(snapshot));
+  } catch {
+    // local demo only
+  }
+}
+
+export function clearSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
   } catch {
     // local demo only
   }

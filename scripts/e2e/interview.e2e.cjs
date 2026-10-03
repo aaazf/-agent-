@@ -278,7 +278,8 @@ async function probeMic(target) {
 }
 
 // 面试形式会写进 localStorage，所以调用方必须显式指定，避免被上一段用例的残留设置带偏。
-async function goToInterview(target, { mode }) {
+// keepOffer=true 时保留"上一场没面完"的恢复面板，交给恢复用例自己断言。
+async function goToInterview(target, { mode, keepOffer = false } = {}) {
   const splash = await target.$(".splash-enter");
   if (splash) await splash.click();
   await target.waitForSelector(".login-submit", { timeout: 20000 });
@@ -290,6 +291,38 @@ async function goToInterview(target, { mode }) {
   await target.waitForFunction(() => document.body.innerText.includes("设备检测与面试类型"), { timeout: 20000 });
   await clickByText(target, mode === "text" ? "文字面试" : "面对面语音");
   await clickByText(target, "下一步：进入模拟面试");
+  await target.waitForFunction(
+    () => document.body.innerText.includes("上一场还没面完") || document.body.innerText.includes("AI 面试官"),
+    { timeout: 25000 }
+  );
+  if (!keepOffer) await dismissResumeOffer(target);
+}
+
+// 本机若还留着上一场的中场快照，其他用例一律选"重新开始"，
+// 保持"新访客从第 1 题开始"的语义；快照本身由 A7 专门验证。
+async function dismissResumeOffer(target) {
+  const shown = await target.evaluate(() => document.body.innerText.includes("上一场还没面完"));
+  if (!shown) return false;
+  await clickByText(target, "放弃上一场，重新开始");
+  return true;
+}
+
+// 中场恢复：只答了一部分就离开（刷新、误关页面）时，应该能接着面完。
+async function runResumeInterview(target, prefix) {
+  await target.reload({ waitUntil: "networkidle2", timeout: 30000 });
+  await goToInterview(target, { mode: "text", keepOffer: true });
+  const offer = await target.evaluate(() => {
+    const text = document.body.innerText;
+    return { shown: text.includes("上一场还没面完"), progress: (text.match(/已完成 \d+ \/ \d+ 题/) || [""])[0] };
+  });
+  check(`${prefix}1 刷新后提示接着面完，而不是从头再来`, offer.shown, offer.progress);
+  check(`${prefix}2 恢复面板如实报出已答题数`, offer.progress === "已完成 1 / 6 题", offer.progress);
+
+  await clickByText(target, "接着面完");
+  const second = await waitForBadgeText(target, "第 2 题", "第 2 题", 40000);
+  check(`${prefix}3 接着面完真的从第 2 题继续`, Boolean(second), second ? second.badge.slice(0, 14) : "仍停在恢复面板");
+  const progress = await target.evaluate(() => (document.body.innerText.match(/进度 \d+ \/ \d+/) || [""])[0]);
+  check(`${prefix}4 恢复后进度把已答的第 1 题算进去`, progress === "进度 1 / 6", progress);
 }
 
 async function runTextInterview(target, prefix) {
@@ -529,6 +562,8 @@ async function runHostedModelInterview(target, prefix, stub) {
       check("A5 语音识别未被权限/策略拒绝", mic.recognition === "started" || mic.recognition === "result" || (mic.recognition.startsWith("error:") && !/not-allowed/.test(mic.recognition)), mic.recognition);
 
       await runTextInterview(page, "A6");
+      // A6 只答了第 1 题就停手，正好留下一个"没面完"的快照给恢复用例用。
+      await runResumeInterview(page, "A7");
     }
 
     const blocked = await browser.newPage();

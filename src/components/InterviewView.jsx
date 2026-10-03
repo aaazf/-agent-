@@ -13,6 +13,7 @@ import {
   MessageSquareText,
   Mic,
   MicOff,
+  Play,
   RotateCcw,
   Send,
   ShieldCheck,
@@ -24,7 +25,8 @@ import {
 import { callModel, canUseModel, generateInterviewerDecision, buildEvaluateMessages, extractJson } from "../lib/model.js";
 import { localQuestion } from "../lib/questions.js";
 import { localEvaluation, normalizeModelEvaluation } from "../lib/evaluate.js";
-import { addResult, loadConsent, saveConsent, uid } from "../lib/storage.js";
+import { addResult, clearSession, loadConsent, loadSession, saveConsent, saveSession, uid } from "../lib/storage.js";
+import { buildSnapshot, resumeDecision } from "../lib/session.js";
 import useCamera from "../hooks/useCamera.js";
 import useTts from "../hooks/useTts.js";
 import useAnswerBuffer from "../hooks/useAnswerBuffer.js";
@@ -59,6 +61,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const [sourceNote, setSourceNote] = useState("");
   const [earlyEnding, setEarlyEnding] = useState(false);
   const [textFallback, setTextFallback] = useState(false);
+  // 上一场没面完的邀请：只在"同一场面试"且还有题没答时出现。
+  const [resumeOffer, setResumeOffer] = useState(null);
 
   const submittingRef = useRef(false);
   const phaseRef = useRef("starting");
@@ -104,18 +108,48 @@ export default function InterviewView({ settings, onFinish, onExit }) {
 
   async function startSession() {
     if (settings.cameraOn && !cameraOn && !cameraStarting) startCamera();
-    let forceText = false;
-    if (settings.interviewMode === "voice" && navigator.mediaDevices?.getUserMedia) {
-      try {
-        const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mic.getTracks().forEach((track) => track.stop());
-      } catch {
-        forceText = true;
-        setTextFallback(true);
-        setSpeechError("无法获得麦克风权限，本场已自动切换为文字面试。");
-      }
-    }
+    const forceText = await ensureMicrophone();
     await askQuestion({ nextHistory: [], mode: "first", forceText });
+  }
+
+  // 语音面试前的麦克风自检：拿不到权限就转文字，别让用户卡在注定失败的流程里。
+  async function ensureMicrophone() {
+    if (!(settings.interviewMode === "voice" && navigator.mediaDevices?.getUserMedia)) return false;
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mic.getTracks().forEach((track) => track.stop());
+      return false;
+    } catch {
+      setTextFallback(true);
+      setSpeechError("无法获得麦克风权限，本场已自动切换为文字面试。");
+      return true;
+    }
+  }
+
+  // 接着上一场面完：把已答轮次放回历史，再按同一套流程问下一题。
+  async function continueSession() {
+    const offer = resumeOffer;
+    if (!offer) return;
+    if (settings.cameraOn && !cameraOn && !cameraStarting) startCamera();
+    updateHistory(offer.snapshot.history);
+    setResumeOffer(null);
+    sessionStartRef.current = offer.snapshot.startedAt || Date.now();
+    const forceText = await ensureMicrophone();
+    await askQuestion({ nextHistory: offer.snapshot.history, forceText });
+  }
+
+  // 明确重开：顺手清掉快照，免得下次进来又被问"要不要接着面"。
+  async function startOver() {
+    clearSession();
+    setResumeOffer(null);
+    sessionStartRef.current = Date.now();
+    if (settings.interviewMode === "text") {
+      await startTextInterview();
+      return;
+    }
+    phaseRef.current = "ready";
+    setPhase("ready");
+    setStatusText("准备好后点击开始，进入自动听答的语音面试");
   }
 
   // 浏览器不支持语音识别时，直接以文字模式开场，避免走一遍注定失败的语音流程。
@@ -409,6 +443,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
       await finishInterview(nextHistory);
       return;
     }
+    // 每答完一题就落一次盘：刷新、误关页面或手机切后台后还能接着面完。
+    saveSession(buildSnapshot({ settings, history: nextHistory, startedAt: sessionStartRef.current }));
     submittingRef.current = false;
     await askQuestion({ nextHistory, forceLocal });
   }
@@ -433,6 +469,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   async function finishInterview(nextHistory) {
     if (finishedRef.current) return;
     finishedRef.current = true;
+    // 整场已经收尾，快照的使命结束，留着只会让人反复看到"继续上一场"。
+    clearSession();
     stopRecognition();
     stopRecording();
     releaseStream();
@@ -521,14 +559,24 @@ export default function InterviewView({ settings, onFinish, onExit }) {
 
   useEffect(() => {
     sessionStartRef.current = Date.now();
-    if (settings.cameraOn) startCamera();
-    if (settings.interviewMode !== "text") resolveVoiceEngine();
-    if (settings.interviewMode !== "text") {
-      phaseRef.current = "ready";
-      setPhase("ready");
-      setStatusText("准备好后点击开始，进入自动听答的语音面试");
+    // 上一场没面完就先问一句：接着面完，还是重新开始。此时不碰摄像头与语音引擎，
+    // 用户还没决定要不要继续这一场，没必要先占设备。
+    const pending = resumeDecision(loadSession(), settings);
+    if (pending.ok) {
+      setResumeOffer(pending);
+      phaseRef.current = "resuming";
+      setPhase("resuming");
+      setStatusText(`上一场面到第 ${pending.answered} / ${pending.total} 题，可以接着面完`);
     } else {
-      askQuestion({ nextHistory: [], mode: "first" });
+      if (settings.cameraOn) startCamera();
+      if (settings.interviewMode !== "text") {
+        resolveVoiceEngine();
+        phaseRef.current = "ready";
+        setPhase("ready");
+        setStatusText("准备好后点击开始，进入自动听答的语音面试");
+      } else {
+        askQuestion({ nextHistory: [], mode: "first" });
+      }
     }
     return () => {
       finishedRef.current = true;
@@ -663,7 +711,37 @@ export default function InterviewView({ settings, onFinish, onExit }) {
         </section>
       ) : null}
 
-      <div className={isTextMode ? "stage-grid text-layout" : "stage-grid"}>
+      {resumeOffer ? (
+        <section className="panel resume-panel">
+          <div className="resume-panel-title">
+            <Clock3 size={17} />
+            <div>
+              <b>上一场还没面完</b>
+              <small>
+                {settings.role} · {settings.direction} · 已完成 {resumeOffer.answered} / {resumeOffer.total} 题
+              </small>
+            </div>
+          </div>
+          <p>
+            接着面完会保留已经答过的 {resumeOffer.answered} 道题，从第 {resumeOffer.answered + 1} 题继续，整场结束后一起评分。
+          </p>
+          <div className="ready-actions">
+            <button className="primary-btn" onClick={continueSession}>
+              <Play size={17} />
+              接着面完（第 {resumeOffer.answered + 1} 题）
+            </button>
+            <button className="outline-btn" onClick={startOver}>
+              <RotateCcw size={16} />
+              放弃上一场，重新开始
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      <div
+        className={isTextMode ? "stage-grid text-layout" : "stage-grid"}
+        style={resumeOffer ? { display: "none" } : undefined}
+      >
         <section className="stage-card interviewer-stage">
           <div className="stage-title">
             <Bot size={17} />
