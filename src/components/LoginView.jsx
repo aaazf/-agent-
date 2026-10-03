@@ -144,14 +144,14 @@ export default function LoginView({ onLogin }) {
             </div>
             <div>
               <CheckCircle2 size={18} />
-              <b>本地数据</b>
-              <small>记录默认只保存在本机</small>
+              <b>本机留存</b>
+              <small>记录只存本机，可一键清除</small>
             </div>
           </div>
 
           <p className="login-note">
             <Sparkles size={13} />
-            数据默认只保存在当前浏览器 localStorage，不会上传到公共服务器。
+            面试记录与设置只保存在当前浏览器 localStorage（最多 7 场，可一键清除）；语音作答时的录音会上传到部署方服务器用于识别文字，面试前会再做一次明确告知。
           </p>
         </section>
       </main>

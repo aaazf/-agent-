@@ -15,6 +15,7 @@ import {
   MicOff,
   RotateCcw,
   Send,
+  ShieldCheck,
   Sparkles,
   Video,
   X,
@@ -23,7 +24,7 @@ import {
 import { callModel, generateInterviewerDecision, buildEvaluateMessages, extractJson } from "../lib/model.js";
 import { localQuestion } from "../lib/questions.js";
 import { localEvaluation, normalizeModelEvaluation } from "../lib/evaluate.js";
-import { addResult, uid } from "../lib/storage.js";
+import { addResult, loadConsent, saveConsent, uid } from "../lib/storage.js";
 import useCamera from "../hooks/useCamera.js";
 import useTts from "../hooks/useTts.js";
 import useAnswerBuffer from "../hooks/useAnswerBuffer.js";
@@ -44,6 +45,8 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const [speechError, setSpeechError] = useState("");
   const [micCheck, setMicCheck] = useState("idle");
   const [micCheckMsg, setMicCheckMsg] = useState("");
+  // 语音作答会在本机之外处理音频，先明确告知再开始；确认状态只存本机。
+  const [consent, setConsent] = useState(() => loadConsent());
   const [bufferActive, setBufferActive] = useState(false);
   const [bufferSeconds, setBufferSeconds] = useState(0);
   const [pauseCount, setPauseCount] = useState(0);
@@ -535,6 +538,13 @@ export default function InterviewView({ settings, onFinish, onExit }) {
   const currentNumber = Math.min(completedRounds + 1, settings.questionCount);
   // 语音面试没有对话记录面板，候选人看不到“被听成了什么”；回显上一题识别结果补上这个信任缺口。
   const lastRecognizedAnswer = completedRounds ? history[completedRounds - 1].answer : "";
+  const voiceUsable = speechAvailable || voiceEngine === "server";
+  // 只在真的会走语音时才拦人；改用文字面试的路径不需要任何确认。
+  const needsVoiceConsent = !isTextMode && voiceUsable && !consent.voiceUpload;
+
+  const acknowledgeVoiceConsent = () => {
+    setConsent(saveConsent({ voiceUpload: true }));
+  };
 
   return (
     <div className="view interview-view">
@@ -596,18 +606,50 @@ export default function InterviewView({ settings, onFinish, onExit }) {
                 语音识别在服务端完成，不依赖浏览器自带语音服务；说完停顿几秒会自动提交。
               </div>
             ) : null}
+            {!isTextMode && voiceUsable ? (
+              <div className="voice-consent">
+                <div className="voice-consent-title">
+                  <ShieldCheck size={14} />
+                  开始前请先了解这段录音会被怎么处理
+                </div>
+                <ul>
+                  <li>
+                    {voiceEngine === "server"
+                      ? "你答完一道题，这段录音会以音频形式上传到本站服务器，再由部署方配置的语音识别服务转成文字，用于继续提问。"
+                      : "你答完一道题，浏览器会把这段语音交给它内置的语音识别服务（例如 Chrome 使用 Google）转成文字，用于继续提问。"}
+                  </li>
+                  <li>录音只在识别时转发，服务端不保存音频文件；面试记录只存在你自己的浏览器里，最多 7 场，可一键清除。</li>
+                  <li>请勿在回答中说出身份证号、银行卡号等敏感信息。</li>
+                </ul>
+                <button
+                  type="button"
+                  className={consent.voiceUpload ? "small-btn" : "small-btn danger"}
+                  onClick={acknowledgeVoiceConsent}
+                  disabled={consent.voiceUpload}
+                >
+                  {consent.voiceUpload ? <Check size={14} /> : <ShieldCheck size={14} />}
+                  {consent.voiceUpload ? "已确认，可以开始" : "我已知晓，同意上传录音识别"}
+                </button>
+              </div>
+            ) : null}
           </div>
           <div className="ready-actions">
-            <button className="primary-btn wide ready-start-btn" onClick={startSession}>
+            <button
+              className="primary-btn wide ready-start-btn"
+              onClick={startSession}
+              disabled={needsVoiceConsent}
+            >
               <Mic size={18} />
-              {speechAvailable || voiceEngine === "server" ? "点击开始语音面试" : "仍然开始（将自动转为文字）"}
+              {needsVoiceConsent
+                ? "请先确认上方语音告知"
+                : voiceUsable
+                  ? "点击开始语音面试"
+                  : "仍然开始（将自动转为文字）"}
             </button>
-            {speechAvailable || voiceEngine === "server" ? null : (
-              <button className="outline-btn" onClick={startTextInterview}>
-                <MessageSquareText size={16} />
-                改用文字面试
-              </button>
-            )}
+            <button className="outline-btn" onClick={startTextInterview}>
+              <MessageSquareText size={16} />
+              {voiceUsable ? "不想上传录音，改用文字面试" : "改用文字面试"}
+            </button>
           </div>
         </section>
       ) : null}

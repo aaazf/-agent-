@@ -4,7 +4,14 @@ import { buildAskMessages, buildEvaluateMessages, extractJson, normalizeIntervie
 import { localEvaluation, normalizeModelEvaluation } from "../src/lib/evaluate.js";
 import { analyzeResumeLocal, profileForPrompt } from "../src/lib/resume.js";
 import { localQuestion } from "../src/lib/questions.js";
-import { DIMENSIONS, formatTime, secondsLabel } from "../src/lib/storage.js";
+import {
+  DIMENSIONS,
+  clearLocalData,
+  formatTime,
+  loadConsent,
+  saveConsent,
+  secondsLabel
+} from "../src/lib/storage.js";
 
 describe("providers", () => {
   it("keeps a single source of truth for preset providers", () => {
@@ -197,5 +204,35 @@ describe("storage helpers", () => {
 
   it("lists the five scoring dimensions", () => {
     expect(DIMENSIONS.map((d) => d.key)).toEqual(["communication", "professional", "matching", "clarity", "composure"]);
+  });
+});
+
+describe("voice consent and local data control", () => {
+  it("默认未确认，确认后写回并可再次读取", () => {
+    localStorage.clear();
+    expect(loadConsent()).toEqual({ voiceUpload: false });
+    expect(saveConsent({ voiceUpload: true })).toEqual({ voiceUpload: true });
+    expect(loadConsent().voiceUpload).toBe(true);
+  });
+
+  it("确认状态损坏时回退为未确认，而不是抛出异常", () => {
+    localStorage.setItem("face-interview-consent-v1", "{不是合法 JSON");
+    expect(loadConsent()).toEqual({ voiceUpload: false });
+  });
+
+  it("clearLocalData 清掉记录、设置、确认状态与引导标记", () => {
+    saveConsent({ voiceUpload: true });
+    localStorage.setItem("face-interview-history-v1", "[]");
+    localStorage.setItem("face-interview-settings-v1", "{}");
+    localStorage.setItem("agent-onboarded", "1");
+    localStorage.setItem("guide-theme", "black");
+
+    clearLocalData();
+
+    expect(loadConsent().voiceUpload).toBe(false);
+    expect(localStorage.getItem("face-interview-history-v1")).toBeNull();
+    expect(localStorage.getItem("face-interview-settings-v1")).toBeNull();
+    expect(localStorage.getItem("agent-onboarded")).toBeNull();
+    expect(localStorage.getItem("guide-theme")).toBeNull();
   });
 });

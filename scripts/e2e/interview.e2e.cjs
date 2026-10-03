@@ -236,6 +236,37 @@ async function runVoiceAsrInterview(target, prefix) {
     observer.observe(document.body, { subtree: true, childList: true, characterData: true });
   });
 
+  // 独立上下文里 localStorage 是空的，所以这里必须走一遍“未确认 → 告知 → 确认”的完整路径。
+  const gate = await target.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const start = buttons.find((b) => (b.textContent || "").includes("点击开始语音面试") || (b.textContent || "").includes("请先确认"));
+    const card = document.querySelector(".voice-consent");
+    return {
+      hasCard: Boolean(card),
+      mentionsUpload: Boolean(card && /上传到本站服务器/.test(card.textContent)),
+      mentionsSensitive: Boolean(card && /敏感信息/.test(card.textContent)),
+      hasTextExit: buttons.some((b) => (b.textContent || "").includes("改用文字面试")),
+      startDisabled: start ? start.disabled : null
+    };
+  });
+  check(
+    `${prefix}0 录音前出现语音告知且开始按钮被拦截`,
+    gate.hasCard && gate.mentionsUpload && gate.mentionsSensitive && gate.startDisabled === true,
+    JSON.stringify(gate)
+  );
+  check(`${prefix}0b 告知卡提供“改用文字面试”出口`, gate.hasTextExit);
+
+  await clickByText(target, "我已知晓，同意上传录音识别");
+  await target.waitForFunction(
+    () => Array.from(document.querySelectorAll("button")).some((b) => (b.textContent || "").includes("已确认，可以开始")),
+    { timeout: 10000 }
+  );
+  const released = await target.evaluate(() => {
+    const start = Array.from(document.querySelectorAll("button")).find((b) => (b.textContent || "").includes("点击开始语音面试"));
+    return start ? start.disabled === false : null;
+  });
+  check(`${prefix}0c 确认后开始按钮解除拦截`, released === true, String(released));
+
   await clickByText(target, "点击开始语音面试");
   await target.waitForFunction(() => document.body.innerText.includes("正在录音（服务端识别）"), { timeout: 40000 });
   check(`${prefix}2 进入服务端录音状态`, true);

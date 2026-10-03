@@ -1,6 +1,9 @@
 export const MAX_RESULTS = 7;
 const SETTINGS_KEY = "face-interview-settings-v1";
 const HISTORY_KEY = "face-interview-history-v1";
+const CONSENT_KEY = "face-interview-consent-v1";
+// App.jsx 的引导与主题标记同样只存在本机，纳入一键清除，避免"清完了还认得我"。
+const EXTRA_KEYS = ["agent-onboarded", "guide-theme"];
 
 export const DIMENSIONS = [
   { key: "communication", label: "沟通表达" },
@@ -82,6 +85,36 @@ export function deleteResult(id) {
   const list = loadHistory().filter((item) => item.id !== id);
   persistHistory(list);
   return list;
+}
+
+// 语音告知的确认状态：只记"是否已被告知录音如何被处理"，不记任何音频内容。
+export function loadConsent() {
+  try {
+    const raw = localStorage.getItem(CONSENT_KEY);
+    if (raw) return { voiceUpload: false, ...JSON.parse(raw) };
+  } catch {
+    // ignore corrupted local storage
+  }
+  return { voiceUpload: false };
+}
+
+export function saveConsent(patch) {
+  const next = { ...loadConsent(), ...patch };
+  try {
+    localStorage.setItem(CONSENT_KEY, JSON.stringify(next));
+  } catch {
+    // local demo only
+  }
+  return next;
+}
+
+// 一键清除本机数据：面试记录、设置、语音告知确认与引导状态都在本机，清掉即回到全新访客。
+export function clearLocalData() {
+  try {
+    [SETTINGS_KEY, HISTORY_KEY, CONSENT_KEY, ...EXTRA_KEYS].forEach((key) => localStorage.removeItem(key));
+  } catch {
+    // local demo only
+  }
 }
 
 export function formatTime(ts) {

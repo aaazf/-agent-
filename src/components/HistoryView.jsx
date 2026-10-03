@@ -38,7 +38,7 @@ function MiniBar({ value, label, best }) {
   );
 }
 
-export default function HistoryView({ history, onOpen, onDelete, onNew }) {
+export default function HistoryView({ history, onOpen, onDelete, onNew, onClear }) {
   const latest = history[0];
   const previous = history[1];
   const average = useMemo(() => {
@@ -88,6 +88,12 @@ export default function HistoryView({ history, onOpen, onDelete, onNew }) {
             <Download size={16} />
             导出全部 JSON
           </button>
+          {onClear ? (
+            <button className="ghost-btn danger" onClick={onClear}>
+              <Trash2 size={16} />
+              清除本机数据
+            </button>
+          ) : null}
           <button className="primary-btn" onClick={onNew}>
             <Plus size={17} />
             新面试

@@ -501,7 +501,12 @@ async function handleHealth(req, res) {
       model: HOSTED_LLM_TOKEN ? HOSTED_LLM_MODEL : "",
       perIpPerDay: HOSTED_LLM_TOKEN ? HOSTED_REQUESTS_PER_IP_PER_DAY : 0
     },
-    limits: { maxBodyBytes: MAX_BODY_BYTES, llmPerMinute: LLM_REQUESTS_PER_MINUTE }
+    limits: {
+      maxBodyBytes: MAX_BODY_BYTES,
+      llmPerMinute: LLM_REQUESTS_PER_MINUTE,
+      asrPerMinute: ASR_REQUESTS_PER_MINUTE,
+      asrPerDay: ASR_REQUESTS_PER_DAY
+    }
   });
 }
 

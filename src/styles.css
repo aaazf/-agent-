@@ -283,6 +283,47 @@ main {
   background: var(--danger-soft);
 }
 
+.ghost-btn.danger {
+  border-color: #f0c7c5;
+  color: var(--danger);
+}
+
+.ghost-btn.danger:hover {
+  border-color: #e2a9a6;
+  background: var(--danger-soft);
+}
+
+/* 语音作答前的告知卡：说明录音会被如何处理，并给出改用文字的出口。 */
+.voice-consent {
+  margin-top: 12px;
+  padding: 12px 13px;
+  border: 1px solid #e4d3b4;
+  border-radius: 8px;
+  background: #fdf8ef;
+}
+
+.voice-consent-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: #6f5427;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.voice-consent ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: #7a6440;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.voice-consent .small-btn {
+  min-height: 34px;
+}
+
 .outline-btn {
   background: #f7fafb;
 }

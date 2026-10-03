@@ -23,7 +23,7 @@ import SplashView from "./components/SplashView.jsx";
 import DeviceSetupPage from "./components/DeviceSetupPage.jsx";
 import ThemePalette from "./components/ThemePalette.jsx";
 import EmbedNotice from "./components/EmbedNotice.jsx";
-import { deleteResult, loadHistory, loadSettings, saveSettings } from "./lib/storage.js";
+import { DEFAULT_SETTINGS, clearLocalData, deleteResult, loadHistory, loadSettings, saveSettings } from "./lib/storage.js";
 
 const NAV_GROUPS = [
   {
@@ -140,6 +140,18 @@ export default function App() {
     if (currentResult?.id === id) setCurrentResult(null);
   }
 
+  // 一键回到“全新访客”：记录、设置与语音告知确认都在本机，清掉即彻底退出。
+  function handleClearLocalData() {
+    const confirmed = window.confirm("确认清除本机数据？面试记录、设置与语音告知确认都会被删除，且无法恢复。");
+    if (!confirmed) return;
+    clearLocalData();
+    localStorage.setItem("guide-theme", theme);
+    setSettings({ ...DEFAULT_SETTINGS });
+    setHistory([]);
+    setCurrentResult(null);
+    setSummaryTab("records");
+  }
+
   const recordsPage = (
     <div className="records-page">
       <div className="records-toolbar">
@@ -171,6 +183,7 @@ export default function App() {
             setSummaryTab("report");
           }}
           onDelete={handleDelete}
+          onClear={handleClearLocalData}
           onNew={() => goPage("simulate")}
         />
       )}
