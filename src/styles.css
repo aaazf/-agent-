@@ -6125,6 +6125,11 @@ body,
   opacity: 1;
 }
 
+.resume-library-note.ok {
+  color: #0f766e;
+  opacity: 1;
+}
+
 .resume-library-list {
   display: grid;
   gap: 8px;
@@ -6184,4 +6189,70 @@ body,
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ---------- 账号与数据（记录页底部） ---------- */
+.account-data-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 16px 18px;
+}
+
+.account-data-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.account-data-head b {
+  display: block;
+  font-size: 15px;
+}
+
+.account-data-head small {
+  display: block;
+  max-width: 760px;
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.7;
+  opacity: 0.72;
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: #0f766e;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.account-data-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  opacity: 0.82;
+}
+
+.account-data-note.warn {
+  color: #c2410c;
+  opacity: 1;
+}
+
+.account-data-note.ok {
+  color: #0f766e;
+  opacity: 1;
+}
+
+.account-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }

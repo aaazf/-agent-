@@ -13,5 +13,9 @@ export const DATA_FLOW = {
 export const dataFlowShort = `${DATA_FLOW.local}${DATA_FLOW.account}${DATA_FLOW.model}`;
 export const dataFlowFull = `${dataFlowShort}${DATA_FLOW.voice}`;
 
+// 保留期限：写清"多久需要重新登录""数据留到什么时候"，避免访客以为账号是永久的。
+export const dataRetention =
+  "登录状态默认保留 30 天（部署方可用 SESSION_TTL_DAYS 调整），到期需重新登录；账号与简历一直保留到你主动删除或注销账号。";
+
 // 侧栏这类窄容器只放一句话的缩略版。
 export const dataFlowCompact = "记录存本机；简历存账号（服务端）；开启模型后简历与回答会发给模型服务";

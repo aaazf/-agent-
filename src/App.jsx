@@ -24,7 +24,8 @@ import SplashView from "./components/SplashView.jsx";
 import DeviceSetupPage from "./components/DeviceSetupPage.jsx";
 import ThemePalette from "./components/ThemePalette.jsx";
 import EmbedNotice from "./components/EmbedNotice.jsx";
-import { logoutAccount, restoreSession } from "./lib/auth.js";
+import AccountDataPanel from "./components/AccountDataPanel.jsx";
+import { logoutAccount, onUnauthorized, restoreSession } from "./lib/auth.js";
 import {
   DEFAULT_SETTINGS,
   adoptLegacyLocalData,
@@ -98,6 +99,24 @@ export default function App() {
       alive = false;
     };
   }, []);
+
+  // 会话在使用过程中过期（默认 30 天，也可能被部署方调短）：任何接口回 401
+  // 都会走到这里，把访客送回登录页并说明原因，而不是让他对着一屏报错发呆。
+  useEffect(
+    () =>
+      onUnauthorized(() => {
+        clearStorageScope();
+        setUser(null);
+        setAuthState("anonymous");
+        setBootStage("login");
+        setSettings({ ...DEFAULT_SETTINGS });
+        setHistory([]);
+        setCurrentResult(null);
+        setSummaryTab("records");
+        setAuthNotice("登录状态已过期，请重新登录；账号里的简历不会丢。");
+      }),
+    []
+  );
 
   // 切换账号作用域：本机的设置/记录/中场快照都跟着账号走，
   // 顺手把登录前留下的无后缀老数据认领到当前账号。
@@ -264,6 +283,9 @@ export default function App() {
           onNew={() => goPage("simulate")}
         />
       )}
+      {summaryTab === "records" ? (
+        <AccountDataPanel account={user?.account} onClearLocal={handleClearLocalData} onDeleted={handleLogout} />
+      ) : null}
     </div>
   );
 

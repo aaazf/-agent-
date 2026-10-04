@@ -8,7 +8,11 @@ import { formatTime } from "../lib/storage.js";
 export default function ResumeLibrary({ current, onLoad, onSaved, compact = false }) {
   const [list, setList] = useState([]);
   const [state, setState] = useState("loading");
-  const [message, setMessage] = useState("");
+  // 两类信息要分开存：loadError 是"列表没读回来"，
+  // note 是"刚才那次操作的结果"。混用一个字段时，保存成功后紧跟的
+  // refresh() 会立刻把"已保存到账号"覆盖掉，访客看不到任何成功反馈。
+  const [loadError, setLoadError] = useState("");
+  const [note, setNote] = useState(null);
   const [cached, setCached] = useState(false);
   const [busyId, setBusyId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,13 +22,17 @@ export default function ResumeLibrary({ current, onLoad, onSaved, compact = fals
       const result = await listResumes();
       setList(result.resumes);
       setCached(result.cached);
-      setMessage(result.error || "");
+      setLoadError(result.error || "");
       setState("ready");
     } catch (err) {
       setState("error");
-      setMessage(err?.message || "读取简历列表失败");
+      setLoadError(err?.message || "读取简历列表失败");
     }
   }, []);
+
+  function showNote(text, kind = "ok") {
+    setNote({ text, kind });
+  }
 
   useEffect(() => {
     refresh();
@@ -40,21 +48,19 @@ export default function ResumeLibrary({ current, onLoad, onSaved, compact = fals
     if (busy) return;
     const payload = toResumePayload(current);
     if (!payload.text.trim()) {
-      setMessage("简历内容还是空的，先填写或导入简历再保存。");
-      setState("error");
+      showNote("简历内容还是空的，先填写或导入简历再保存。", "error");
       return;
     }
     setBusy(true);
-    setMessage("");
+    setNote(null);
     try {
       const saved = await saveResume({ ...payload, id: existingIdFor(payload) });
       setState("ready");
-      setMessage(`已保存到账号：${saved?.title || payload.title || "未命名简历"}`);
+      showNote(`已保存到账号：${saved?.title || payload.title || "未命名简历"}`);
       await refresh();
       onSaved?.(saved);
     } catch (err) {
-      setState("error");
-      setMessage(err?.message || "保存失败，请稍后重试。");
+      showNote(err?.message || "保存失败，请稍后重试。", "error");
     } finally {
       setBusy(false);
     }
@@ -62,11 +68,10 @@ export default function ResumeLibrary({ current, onLoad, onSaved, compact = fals
 
   async function handleLoad(resume) {
     setBusyId(resume.id);
-    setMessage("");
+    setNote(null);
     try {
       onLoad?.(resume);
-      setMessage(`已载入：${resume.title || "未命名简历"}`);
-      setState("ready");
+      showNote(`已载入：${resume.title || "未命名简历"}`);
     } finally {
       setBusyId("");
     }
@@ -78,10 +83,9 @@ export default function ResumeLibrary({ current, onLoad, onSaved, compact = fals
     try {
       await deleteResume(resume.id);
       await refresh();
-      setMessage("已删除。");
+      showNote("已删除。");
     } catch (err) {
-      setState("error");
-      setMessage(err?.message || "删除失败，请稍后重试。");
+      showNote(err?.message || "删除失败，请稍后重试。", "error");
     } finally {
       setBusyId("");
     }
@@ -111,14 +115,22 @@ export default function ResumeLibrary({ current, onLoad, onSaved, compact = fals
         </p>
       ) : null}
 
-      {message ? (
-        <p className={`resume-library-note ${state === "error" ? "warn" : ""}`}>
-          {state === "error" ? <AlertTriangle size={13} /> : null}
-          {message}
+      {loadError ? (
+        <p className="resume-library-note warn">
+          <AlertTriangle size={13} />
+          {loadError}
           {cached ? "（当前显示的是本机缓存）" : ""}
         </p>
       ) : null}
 
+      {note ? (
+        <p className={`resume-library-note ${note.kind === "error" ? "warn" : "ok"}`} role="status">
+          {note.kind === "error" ? <AlertTriangle size={13} /> : null}
+          {note.text}
+        </p>
+      ) : null}
+
+      {/* 空列表提示与操作结果并存：列表为空时"怎么添加"这件事永远要说清楚 */}
       {state !== "loading" && list.length === 0 ? (
         <p className="resume-library-note">还没有保存过简历。填好下面的内容后点「保存当前简历」。</p>
       ) : null}

@@ -95,7 +95,50 @@ export function evaluateHealth(health) {
     check("成本闸门", Boolean(limitsOk), limitsOk ? JSON.stringify(limits) : "limits 字段缺失，无法确认限额是否生效")
   );
 
+  // 账号体系：这是登录页能不能用的前提。旧版本没有 accounts 字段，
+  // 前端会一直停在"注册/登录失败"，所以这里按必须处理来判定。
+  const accounts = health.accounts;
+  if (!accounts) {
+    checks.push(check("账号体系", false, "响应里没有 accounts 字段：这是没有账号功能的旧镜像，登录页会一直失败"));
+  } else {
+    checks.push(
+      check(
+        "账号体系",
+        true,
+        accounts.signup
+          ? `注册已开放${accounts.inviteRequired ? "（需要邀请码）" : ""}；当前 ${accounts.users} 个账号 / ${accounts.resumes} 份简历`
+          : "注册已关闭（ALLOW_SIGNUP=0），只有已有账号能登录"
+      )
+    );
+    // 创空间容器默认没有持久卷：不挂载的话，账号与简历会在重启后消失，
+    // 这是"社区访客第二天回来发现账号没了"的根因，必须显式提示。
+    checks.push(
+      check(
+        "数据持久化",
+        accounts.persistent === true,
+        accounts.persistent
+          ? "账号与简历已落盘（重启后仍在）"
+          : `数据目录不可写或未挂载持久卷，容器重启后账号与简历会丢失（${accounts.reason || "原因未知"}）`,
+        false
+      )
+    );
+    if (accounts.signup && !accounts.inviteRequired) {
+      checks.push(
+        check("注册防线", false, "注册完全开放且没有邀请码，公开体验站建议设置 SIGNUP_INVITE_CODE", false)
+      );
+    }
+  }
+
   return checks;
+}
+
+// 纯函数：未登录访问受保护接口必须回 401。
+// 账号类故障里最致命的是"越权"，而它往往表现为这里返回了 200。
+export function evaluateAuthBoundary({ me, resumes } = {}) {
+  return [
+    check("认证边界 · 会话自检", me === 401, `不带 token 请求 /api/auth/me 返回 ${me}`),
+    check("认证边界 · 简历读取", resumes === 401, `不带 token 请求 /api/resumes 返回 ${resumes}`)
+  ];
 }
 
 // 纯函数：首页必须是能跑起来的生产构建（不能只返回一个空白壳）。
@@ -146,6 +189,16 @@ async function main() {
     checks.push(check("接口存活", false, `${base} 不可达：${err?.message || err}`));
   }
   checks.push(...evaluateHealth(health));
+
+  try {
+    const [me, resumes] = await Promise.all([
+      fetch(`${base}/api/auth/me`, { method: "GET", signal: AbortSignal.timeout(20000) }),
+      fetch(`${base}/api/resumes`, { method: "GET", signal: AbortSignal.timeout(20000) })
+    ]);
+    checks.push(...evaluateAuthBoundary({ me: me.status, resumes: resumes.status }));
+  } catch (err) {
+    checks.push(check("认证边界", false, `认证接口不可达：${err?.message || err}`));
+  }
 
   try {
     const res = await fetch(base, { signal: AbortSignal.timeout(20000) });

@@ -5,6 +5,7 @@ import {
   loadToken,
   loginAccount,
   logoutAccount,
+  onUnauthorized,
   registerAccount,
   request,
   restoreSession,
@@ -102,6 +103,35 @@ describe("启动时的登录态恢复", () => {
 });
 
 describe("退出登录", () => {
+  it("使用中的会话过期时清 token 并通知上层回登录页", async () => {
+    saveToken("tok-1");
+    const handleExpired = vi.fn();
+    const off = onUnauthorized(handleExpired);
+    stubFetch(jsonResponse({ error: "登录状态已过期，请重新登录", code: "session_expired" }, { ok: false, status: 401 }));
+    await expect(request("/api/resumes", { method: "GET" })).rejects.toMatchObject({ status: 401 });
+    expect(loadToken()).toBe("");
+    expect(handleExpired).toHaveBeenCalledWith("session_expired");
+    off();
+  });
+
+  it("登录接口的 401（密码错误）不该被当成会话过期", async () => {
+    const handleExpired = vi.fn();
+    const off = onUnauthorized(handleExpired);
+    stubFetch(jsonResponse({ error: "账号或密码不正确。", code: "invalid_credentials" }, { ok: false, status: 401 }));
+    await expect(loginAccount({ account: "alice", password: "x" })).rejects.toMatchObject({ status: 401 });
+    expect(handleExpired).not.toHaveBeenCalled();
+    off();
+  });
+
+  it("取消订阅后不再收到通知", async () => {
+    saveToken("tok-1");
+    const handleExpired = vi.fn();
+    onUnauthorized(handleExpired)();
+    stubFetch(jsonResponse({ error: "x", code: "session_expired" }, { ok: false, status: 401 }));
+    await expect(request("/api/auth/me", { method: "GET" })).rejects.toBeTruthy();
+    expect(handleExpired).not.toHaveBeenCalled();
+  });
+
   it("即使服务端失败也要清掉本地 token", async () => {
     saveToken("tok-1");
     stubFetch(new Error("boom"));

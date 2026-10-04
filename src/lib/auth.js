@@ -48,6 +48,17 @@ export function authHeaders(extra = {}) {
   return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
 }
 
+// 会话过期时的全局回调：让 App 能把访客请回登录页，而不是让页面停在
+// 一堆"请求失败"的错误提示上。
+let unauthorizedHandler = null;
+
+export function onUnauthorized(handler) {
+  unauthorizedHandler = handler;
+  return () => {
+    if (unauthorizedHandler === handler) unauthorizedHandler = null;
+  };
+}
+
 // 统一的 JSON 请求：把 HTTP 状态与后端 code 转成结构化错误，
 // 页面只需要判断 err.code / err.offline，不用各自解析响应体。
 export async function request(path, { method = "POST", body, auth = true, signal } = {}) {
@@ -71,17 +82,24 @@ export async function request(path, { method = "POST", body, auth = true, signal
     data = null;
   }
   if (!res.ok) {
+    // 401 说明登录态已经失效：先清掉本机 token，再通知上层回登录页。
+    // 登录/注册接口用 auth=false 调用，所以"密码错误"不会被误判成会话过期。
+    if (res.status === 401 && auth) {
+      clearToken();
+      const code = data?.code || "unauthenticated";
+      if (unauthorizedHandler) unauthorizedHandler(code);
+    }
     throw new ApiError(data?.error || `请求失败（${res.status}）`, { status: res.status, code: data?.code || "" });
   }
   return data || {};
 }
 
 export function registerAccount({ account, password, inviteCode }) {
-  return request("/api/auth/register", { body: { account, password, inviteCode } });
+  return request("/api/auth/register", { body: { account, password, inviteCode }, auth: false });
 }
 
 export function loginAccount({ account, password }) {
-  return request("/api/auth/login", { body: { account, password } });
+  return request("/api/auth/login", { body: { account, password }, auth: false });
 }
 
 // 退出登录要幂等：服务端删不掉（离线/已过期）也必须能干净地退回登录页，
