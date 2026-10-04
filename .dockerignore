@@ -4,6 +4,7 @@ dist
 .gitignore
 *.log
 .env
+data
 dev-server.log
 dev-server.err.log
 docs
