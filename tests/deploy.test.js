@@ -124,6 +124,20 @@ describe("部署文档与环境变量样例不腐化", () => {
     }
   });
 
+  // 创空间很可能没有持久卷。这种情况必须给部署方一段现成的兜底话术，
+  // 否则要么悄悄对访客承诺"账号长期保存"，要么把丢数据说成程序 bug。
+  it("没有持久卷时的兜底话术在文档里，且指明了导出与注销出口", () => {
+    const from = deployDoc.indexOf("平台确实没有持久卷时");
+    const to = deployDoc.indexOf("## 5. 部署后自检");
+    expect(from, "部署文档缺少「平台确实没有持久卷时」这一节").toBeGreaterThan(-1);
+    const block = deployDoc.slice(from, to);
+    expect(block).toContain("账号只在当次容器生命周期内有效");
+    expect(block).toContain("导出账号数据");
+    expect(block).toContain("注销账号");
+    // 话术只写给部署方看还不够，落地检查表里也要有对应项
+    expect(deployDoc).toContain("可直接粘「平台确实没有持久卷时」那段现成文案");
+  });
+
   it("文档写的 E2E 断言条数不落后于脚本（加用例就得改文档）", () => {
     const stated = Number(/跑 (\d+) 条断言/.exec(deployDoc)?.[1] || 0);
     const inScript = (read("scripts/e2e/interview.e2e.cjs").match(/check\(/g) || []).length;
