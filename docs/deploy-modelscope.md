@@ -91,7 +91,7 @@ ASR 上游的契约很小：`POST {ASR_BASE_URL}/audio/transcriptions`，`multip
 - 访客能自己处置数据：「面试记录」页底部有 **导出账号数据**（含简历）、**注销账号**（要求输入口令 + 二次确认，连简历一起删）、**清除本机缓存**。
 - **跨容器重启能不能保住账号，取决于创空间给不给持久化目录**：容器本地可写层在重建/迁移后会丢。判断方法是启动日志里的一行：
   - `[store] 持久化已启用 -> <路径>`：正常，账号重启后仍在；
-  - `[store] 持久化不可用（容器重启后账号与简历会丢失） -> <路径>`：目录不可写，已降级为**内存存储**，账号只在当次容器生命周期内有效（服务仍可用，但访客重启后会看到"账号不存在"）。
+  - `[store] 持久化不可用（容器重启后账号与简历会丢失） -> <路径>`：目录不可写，已降级为**内存存储**，账号只在当次容器生命周期内有效（服务仍可用，但访客重启后会看到"账号不存在"）。`preflight` 里对应 `[WARN] 数据持久化：数据目录不可写或未挂载持久卷，容器重启后账号与简历会丢失（<原因>）`。
   把 `DATA_DIR` / `STORE_FILE` 指向平台提供的持久化目录（数据集、持久卷等）即可解决。
 - `npm run preflight` 会一次性核这三件事：「账号体系」（部署的还是没有账号功能的旧镜像时直接 FAIL）、「数据持久化」、「认证边界」（未登录访问 `/api/auth/me` 或 `/api/resumes` 必须是 401）。
 - 已知边界：存储层是**单进程 + 全量 JSON**，设计目标是"几百个账号 + 每账号几份简历"。真要多实例部署或上万账号，需要替换 `server/store.mjs` 的实现（路由与前端不用动）。
@@ -104,34 +104,35 @@ ASR 上游的契约很小：`POST {ASR_BASE_URL}/audio/transcriptions`，`multip
 npm run preflight -- https://<你的创空间域名>
 ```
 
-期望输出（下面是本机实测的一次；`WARN` 都有降级路径，不阻断部署，退出码仍为 0）：
+期望输出（下面是本次实测的一次，托管 Key、ASR 三项与邀请码都配齐了；`WARN` 都有降级路径，不阻断部署，退出码仍为 0）：
 
 ```text
   [PASS] 接口存活：/api/health 返回 ok
-  [WARN] 共享额度：未配置 HOSTED_LLM_TOKEN：访客必须自带 API Key 才能用模型，社区体验会明显变差
+  [PASS] 共享额度：已开启，单访客每日 40 次，模型 Qwen/Qwen3.5-35B-A3B
+  [PASS] 当日额度余量：已用 0 / 800
+  [PASS] 托管模型：Qwen/Qwen3.5-35B-A3B 在上游清单中
   [PASS] 语音播报：Edge TTS 可用
-  [WARN] 语音识别：降级为浏览器识别/文字作答（缺少配置：ASR_BASE_URL / ASR_MODEL / ASR_TOKEN）
+  [PASS] 语音识别：服务端识别已启用（FunAudioLLM/SenseVoiceSmall），访客无需自带 Key
   [PASS] 成本闸门：{"maxBodyBytes":12582912,"llmPerMinute":20,"asrPerMinute":20,"asrPerDay":600}
-  [PASS] 账号体系：注册已开放；当前 0 个账号 / 0 份简历
+  [PASS] 账号体系：注册已开放（需要邀请码）；当前 0 个账号 / 0 份简历
   [PASS] 数据持久化：账号与简历已落盘（重启后仍在）
-  [WARN] 注册防线：注册完全开放且没有邀请码，公开体验站建议设置 SIGNUP_INVITE_CODE
   [PASS] 认证边界 · 会话自检：不带 token 请求 /api/auth/me 返回 401
   [PASS] 认证边界 · 简历读取：不带 token 请求 /api/resumes 返回 401
   [PASS] 静态页面：GET / 返回 200
   [PASS] 页面挂载点：index.html 含 #root
   [PASS] 前端产物：已引用打包后的 JS
 
-==== 10 PASS / 3 WARN / 0 FAIL ====
-建议处理：共享额度、语音识别、注册防线
+==== 14 PASS / 0 WARN / 0 FAIL ====
 ```
 
-三条 `WARN` 的含义：
+还没配的项会显示成 `WARN` 而不是 `FAIL`（本机未配置时实测 `10 PASS / 3 WARN / 0 FAIL`，末尾会给一行 `建议处理：共享额度、语音识别、注册防线`）：
 
-- **共享额度 / 语音识别**：按第 4 节配好 `HOSTED_LLM_TOKEN` 与 `ASR_*`（Base URL、Model、Token 三件套）后自动变 `PASS`。
-- **注册防线**：设置 `SIGNUP_INVITE_CODE`（或 `ALLOW_SIGNUP=0` 关闭注册）后这行才会消失；它不是故障，而是提醒。
+- **共享额度**：没配 `HOSTED_LLM_TOKEN` 时提示"访客必须自带 API Key 才能用模型"，按第 4 节配好即 `PASS`。
+- **语音识别**：缺 `ASR_BASE_URL` / `ASR_MODEL` / `ASR_TOKEN` 任一项时提示降级为浏览器识别或文字作答。
+- **注册防线**：注册开放且没有邀请码时的提醒；设置 `SIGNUP_INVITE_CODE`（或 `ALLOW_SIGNUP=0`）后这行直接消失，不是故障。
 - 「账号体系」出现"旧镜像"字样时**必须处理**；「数据持久化」出现 `WARN` 时账号重启即丢，见上面的「账号与数据」。
 
-只想看服务端能力时，也可以直接读 `/api/health`（加 `?deep=1` 会额外核对一次上游模型清单）：
+只想看服务端能力时，也可以直接读 `/api/health`（默认不发起任何外部请求；加 `?deep=1` 会额外核对一次上游模型清单，`npm run preflight` 走的就是这一条）：
 
 ```bash
 curl -s -X POST "https://<你的创空间域名>/api/health?deep=1"
@@ -144,6 +145,15 @@ curl -s -X POST "https://<你的创空间域名>/api/health?deep=1"
   "ok": true,
   "tts": { "available": true, "reason": "" },
   "asr": { "available": true, "model": "FunAudioLLM/SenseVoiceSmall", "reason": "" },
+  "accounts": {
+    "signup": true,
+    "inviteRequired": true,
+    "sessionTtlDays": 30,
+    "persistent": true,
+    "reason": "",
+    "users": 0,
+    "resumes": 0
+  },
   "hostedLlm": {
     "enabled": true,
     "model": "Qwen/Qwen3.5-35B-A3B",
@@ -156,6 +166,8 @@ curl -s -X POST "https://<你的创空间域名>/api/health?deep=1"
 ```
 
 - `tts.available=false`：容器内没有可用的 `python3 + edge-tts`，语音播报会自动降级为浏览器内置 TTS，不影响流程。
+- `accounts.persistent=false`：账号数据目录不可写，已降级为内存存储，容器重启后访客的账号与简历会丢；`reason` 里是底层原因。
+- `accounts.inviteRequired=true`：注册需要邀请码（已设置 `SIGNUP_INVITE_CODE`）；`accounts.signup=false` 表示已用 `ALLOW_SIGNUP=0` 关闭注册。
 - `hostedLlm.enabled=false`：没配托管 Key，访客需自带 Key 才能用模型提问（否则走本地题库）。
 - `asr.available=false`：`reason` 会说明缺哪个变量；此时语音作答自动退回浏览器识别或文字作答。
 - `hostedLlm.modelAvailable=false`：**必须处理**——配置的托管模型已不在上游清单里，访客会直接看到模型报错。响应里会带上 `availableModels`（同组织模型排在前面），换成其中一个即可；也可以直接 `HOSTED_LLM_MODEL=<在架模型>` 覆盖。
