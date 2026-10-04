@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 *.log
+# 账号与简历的本地数据文件：绝对不该进仓库（可能含访客简历）
+data

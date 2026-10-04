@@ -44,7 +44,9 @@ export default function ApiAccessView({
   standalone = false,
   onSaved,
   allowEmpty = false,
-  onBack
+  onBack,
+  // 首次引导里这一步的"返回"其实是退出登录：换账号要看得懂按钮在干什么。
+  backLabel = "← 返回上一步"
 }) {
   const [form, setForm] = useState({ ...settings });
   const [testState, setTestState] = useState("idle");
@@ -111,7 +113,7 @@ export default function ApiAccessView({
         <div className="module-heading-note">
           {onBack ? (
             <button className="ghost-btn heading-back-btn" type="button" onClick={onBack}>
-              ← 返回上一步
+              {backLabel}
             </button>
           ) : null}
           <span className="heading-security-note">

@@ -11,6 +11,9 @@ const read = (relative) => readFileSync(path.join(process.cwd(), relative), "utf
 describe("数据流向告知", () => {
   it("长文案同时覆盖本机留存、模型传输与录音上传", () => {
     expect(dataFlowFull).toContain("浏览器");
+    // 有了账号体系后，简历不再"只在本机"：必须把服务端这一环说清楚
+    expect(dataFlowFull).toContain("服务器");
+    expect(dataFlowFull).toContain("账号");
     expect(dataFlowFull).toContain("模型服务");
     expect(dataFlowFull).toContain("录音");
   });
@@ -20,9 +23,15 @@ describe("数据流向告知", () => {
     expect(dataFlowCompact).toContain("模型服务");
   });
 
-  it("拼接顺序稳定：本地 → 模型 → 语音", () => {
-    expect(dataFlowShort).toBe(DATA_FLOW.local + DATA_FLOW.model);
+  it("拼接顺序稳定：本机 → 账号 → 模型 → 语音", () => {
+    expect(dataFlowShort).toBe(DATA_FLOW.local + DATA_FLOW.account + DATA_FLOW.model);
     expect(dataFlowFull).toBe(dataFlowShort + DATA_FLOW.voice);
+  });
+
+  it("账号那段写清了密码只存哈希，并给出导出与注销出口", () => {
+    expect(DATA_FLOW.account).toContain("哈希");
+    expect(DATA_FLOW.account).toContain("导出");
+    expect(DATA_FLOW.account).toContain("注销");
   });
 
   it("四个页面都不再出现只说本机的旧说法", () => {

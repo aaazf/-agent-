@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, LoaderCircle, Save, ScanText, ShieldCheck, UploadCloud } from "lucide-react";
 import { analyzeResumeLocal } from "../lib/resume.js";
 import { analyzeResumeWithModel, canUseModel } from "../lib/model.js";
+import { saveResume } from "../lib/resumes.js";
+import ResumeLibrary from "./ResumeLibrary.jsx";
 
 export default function ResumeAnalysisPage({ settings, onSave, onNext }) {
   const [resume, setResume] = useState(settings.resume || "");
@@ -78,7 +80,30 @@ export default function ResumeAnalysisPage({ settings, onSave, onNext }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 从账号里载入一份已保存的简历：文本与之前算好的画像一起回来。
+  function loadSavedResume(saved) {
+    setResume(saved.text || "");
+    if (saved.analysis) {
+      setAnalysis(saved.analysis);
+      setStatus("ok");
+      setMsg(`已载入账号里的简历：${saved.title || "未命名简历"}`);
+      return;
+    }
+    setMsg(`已载入账号里的简历：${saved.title || "未命名简历"}，可点"重新分析"更新画像`);
+    analyze(saved.text || "");
+  }
+
   function save() {
+    // 这里也往账号里存一份：这个按钮的字面意思就是"保存"，
+    // 只写本机 localStorage 会让访客换台电脑就找不到自己的简历。
+    saveResume({
+      title: `${settings.direction}·${settings.role}`,
+      role: settings.role,
+      direction: settings.direction,
+      text: resume,
+      jd: settings.jd,
+      analysis
+    }).catch(() => {});
     onSave({ ...settings, resume, resumeAnalysis: analysis });
     onNext();
   }
@@ -99,6 +124,11 @@ export default function ResumeAnalysisPage({ settings, onSave, onNext }) {
 
       <div className="resume-analyze-grid">
         <section className="panel">
+          <ResumeLibrary
+            compact
+            current={{ title: `${settings.direction}·${settings.role}`, role: settings.role, direction: settings.direction, text: resume, jd: settings.jd, analysis }}
+            onLoad={loadSavedResume}
+          />
           <button
             type="button"
             className="resume-import"

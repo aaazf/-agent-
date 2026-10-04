@@ -1,7 +1,14 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clientKey, createDailyBudget, createKeyedDailyBudget, createSlidingWindowLimiter } from "../server/quota.mjs";
 import { createApiHandlers, resolveUpstreamUrl } from "../server/api.mjs";
+
+// 账号存储的落盘位置：不指定的话 /api/health 会在仓库里建 data/，
+// 单测必须写到临时目录，绝不碰真实数据文件。
+process.env.STORE_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ia-server-test-")), "store.json");
 
 function createReq(payload, { headers = {}, method = "POST", url = "/api/llm" } = {}) {
   const body = Buffer.from(JSON.stringify(payload ?? {}), "utf8");
@@ -123,6 +130,19 @@ describe("quota helpers", () => {
     for (let i = 0; i < 5; i += 1) expect(unlimited.take().ok).toBe(true);
   });
 
+  it("check() 只看不计数，clear() 能解除已有计数（登录锁定用得到）", () => {
+    const limiter = createSlidingWindowLimiter({ windowMs: 60_000, max: 2 });
+    limiter.take("alice");
+    limiter.take("alice");
+    // 已经到上限：check 不消耗也不放行
+    expect(limiter.check("alice").ok).toBe(false);
+    expect(limiter.check("alice").ok).toBe(false);
+    expect(limiter.take("alice").ok).toBe(false);
+    limiter.clear("alice");
+    expect(limiter.check("alice").ok).toBe(true);
+    expect(limiter.take("alice").ok).toBe(true);
+  });
+
   it("prefers the forwarded client address when present", () => {
     expect(clientKey({ headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8" }, socket: { remoteAddress: "10.0.0.1" } })).toBe("1.2.3.4");
     expect(clientKey({ headers: {}, socket: { remoteAddress: "10.0.0.1" } })).toBe("10.0.0.1");
@@ -154,9 +174,23 @@ describe("quota helpers", () => {
 });
 
 describe("api routes", () => {
-  it("registers llm, resume, tts and health endpoints", () => {
+  it("registers llm, resume, tts, health 与账号体系的全部接口", () => {
     expect(Object.keys(createApiHandlers()).sort()).toEqual(
-      ["/api/asr", "/api/edge-tts", "/api/health", "/api/llm", "/api/parse-resume"].sort()
+      [
+        "/api/asr",
+        "/api/edge-tts",
+        "/api/health",
+        "/api/llm",
+        "/api/parse-resume",
+        "/api/auth/register",
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/auth/me",
+        "/api/resumes",
+        "/api/resumes/delete",
+        "/api/account/export",
+        "/api/account/delete"
+      ].sort()
     );
   });
 
@@ -166,6 +200,10 @@ describe("api routes", () => {
     expect(json.ok).toBe(true);
     expect(typeof json.tts.available).toBe("boolean");
     expect(json.hostedLlm.enabled).toBe(false);
+    // 部署方靠这几个字段判断"账号能不能用、重启后数据还在不在"
+    expect(json.accounts.signup).toBe(true);
+    expect(json.accounts.persistent).toBe(true);
+    expect(typeof json.accounts.users).toBe("number");
   });
 
   it("asks for a key when no hosted token is configured", async () => {
@@ -360,6 +398,49 @@ describe("hosted token mode", () => {
     expect(JSON.parse(blocked.body).code).toBe("hosted_quota_exceeded");
     // 修复前这里也会 429：全站共用一个"每人每日"额度池
     expect((await call("2.2.2.2")).statusCode).toBe(200);
+  });
+
+  it("登录后的共享额度按账号计：同一出口 IP 的两个账号互不挤占", async () => {
+    vi.stubEnv("HOSTED_LLM_TOKEN", "ms-hosted-token");
+    vi.stubEnv("HOSTED_LLM_BASE_URL", "https://api-inference.modelscope.cn/v1");
+    vi.stubEnv("HOSTED_REQUESTS_PER_IP_PER_DAY", "1");
+    vi.resetModules();
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      text: async () => JSON.stringify({ choices: [{ message: { content: "你好" } }] })
+    }));
+    const mod = await import("../server/api.mjs");
+    const { createStore } = await import("../server/store.mjs");
+    const store = createStore({ file: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ia-quota-")), "store.json") });
+    const handlers = mod.createApiHandlers({ store });
+
+    const register = async (account) => {
+      const res = createRes();
+      await handlers["/api/auth/register"](createReq({ account, password: "interview2026" }), res);
+      expect(res.statusCode).toBe(200);
+      return JSON.parse(res.body).token;
+    };
+    const alice = await register("alice");
+    const bob = await register("bob");
+
+    // 两个账号从同一个出口 IP 调用共享额度
+    const call = async (token) => {
+      const res = createRes();
+      await handlers["/api/llm"](
+        createReq({ messages: [{ role: "user", content: "hi" }] }, { headers: { "x-forwarded-for": "5.5.5.5", authorization: `Bearer ${token}` } }),
+        res
+      );
+      return res;
+    };
+    expect((await call(alice)).statusCode).toBe(200);
+    // Alice 用完了自己的每日额度
+    const blocked = await call(alice);
+    expect(blocked.statusCode).toBe(429);
+    expect(JSON.parse(blocked.body).code).toBe("hosted_quota_exceeded");
+    // 同一 IP 的 Bob 不受影响：额度记在账号上，不是 IP 上
+    expect((await call(bob)).statusCode).toBe(200);
   });
 
   it("health 里带上共享额度的当日用量，避免额度耗尽后才发现", async () => {

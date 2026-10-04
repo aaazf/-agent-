@@ -9,18 +9,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MODEL_CATALOG } from "../src/lib/providers.js";
+import { ACCOUNT_ROUTE_METHODS, createAccountHandlers, signupStatus } from "./account-routes.mjs";
 import { ASR_CONFIG, asrStatus, transcribeAudio } from "./asr.mjs";
+import { hashToken, readBearer } from "./auth.mjs";
 import { loadDotEnv, projectRoot } from "./env.mjs";
+import { HttpError, MAX_BODY_BYTES, fail, numberFromEnv, readBinaryBody, readJsonBody, sendJson } from "./http.mjs";
 import { clientKey, createDailyBudget, createKeyedDailyBudget, createSlidingWindowLimiter } from "./quota.mjs";
+import { getStore } from "./store.mjs";
 
 loadDotEnv();
 
-const numberFromEnv = (name, fallback) => {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) ? value : fallback;
-};
-
-const MAX_BODY_BYTES = numberFromEnv("MAX_BODY_BYTES", 12 * 1024 * 1024);
 const EDGE_TTS_SCRIPT = process.env.EDGE_TTS_SCRIPT || path.join(projectRoot, "scripts", "edge_tts_speak.py");
 const EDGE_TTS_TIMEOUT_MS = numberFromEnv("EDGE_TTS_TIMEOUT_MS", 30000);
 const EDGE_TTS_CACHE_MAX = 40;
@@ -55,6 +53,25 @@ const hostedGlobalBudget = createDailyBudget({ max: HOSTED_REQUESTS_PER_DAY });
 // 必须按访客分别计数：这里原来误用全局计数器，等于全站共用一个"每人每日"额度池，
 // 一个人面完几场就把所有社区访客挡在门外。
 const hostedPerIpBudget = createKeyedDailyBudget({ max: HOSTED_REQUESTS_PER_IP_PER_DAY });
+
+// 路由层共用的存储单例。默认走 getStore()；只有测试会显式注入临时存储，
+// 避免单测把账号写进仓库里的 data/。
+let activeStore = null;
+function storeRef() {
+  return activeStore || getStore();
+}
+
+// 共享额度的计数键：已登录按账号计，未登录退回按 IP 计。
+// 同一间宿舍/公司出口 IP 后面可能坐着十几个访客，按 IP 计数会让彼此互相挤掉额度；
+// 而按账号计数也顺手把"注册一个新号就重置额度"限制在注册名额（SIGNUPS_PER_DAY）之内。
+function hostedQuotaKey(req) {
+  const token = readBearer(req);
+  if (token) {
+    const session = storeRef().sessions.byTokenHash(hashToken(token));
+    if (session) return `user:${session.userId}`;
+  }
+  return `ip:${clientKey(req)}`;
+}
 
 // baseUrl 白名单：默认只允许目录里预置的服务商域名，避免被当成任意请求的跳板（SSRF）。
 const ALLOWED_MODEL_HOSTS = new Set(
@@ -104,57 +121,6 @@ function clampNumber(value, fallback, min, max) {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.min(max, Math.max(min, num));
-}
-
-class HttpError extends Error {
-  constructor(statusCode, message, code) {
-    super(message);
-    this.statusCode = statusCode;
-    this.code = code;
-  }
-}
-
-async function readJsonBody(req, maxBytes = MAX_BODY_BYTES) {
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > maxBytes) {
-      throw new HttpError(413, `请求体超过 ${Math.round(maxBytes / 1024 / 1024)}MB 上限`, "payload_too_large");
-    }
-    chunks.push(chunk);
-  }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
-}
-
-// 音频以原始二进制上传（而不是 multipart），前端只要把 Blob 直接当 body 发过来即可。
-async function readBinaryBody(req, maxBytes) {
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.length;
-    if (total > maxBytes) {
-      throw new HttpError(413, `音频超过 ${Math.round(maxBytes / 1024 / 1024)}MB 上限`, "payload_too_large");
-    }
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-function sendJson(res, statusCode, payload, code) {
-  res.statusCode = statusCode;
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.end(JSON.stringify(code ? { ...payload, code } : payload));
-}
-
-function fail(res, err, fallbackStatus, fallbackCode) {
-  if (res.writableEnded || res.destroyed) return;
-  if (err instanceof HttpError) {
-    sendJson(res, err.statusCode, { error: err.message }, err.code);
-    return;
-  }
-  // 上游/底层模块可能自带更精确的 code（如 asr_upstream_error），优先透出便于前端分流。
-  sendJson(res, fallbackStatus, { error: err.message || String(err) }, err.code || fallbackCode);
 }
 
 // ---------- Edge TTS ----------
@@ -302,7 +268,7 @@ async function handleLlm(req, res) {
       if (!HOSTED_LLM_TOKEN) {
         throw new HttpError(400, "未配置 API Key", "api_key_required");
       }
-      const perIp = hostedPerIpBudget.take(clientKey(req));
+      const perIp = hostedPerIpBudget.take(hostedQuotaKey(req));
       if (!perIp.ok) {
         throw new HttpError(429, "今日免费体验额度已用完，请填写自己的 API Key 继续练习。", "hosted_quota_exceeded");
       }
@@ -526,10 +492,20 @@ async function probeHostedModelIds() {
 
 async function handleHealth(req, res) {
   const tts = await ttsStatus();
+  const storeStatus = storeRef().status();
   const payload = {
     ok: true,
     tts: { available: tts.available, reason: tts.reason },
     asr: asrStatus(),
+    // 账号体系是否可用、数据落在哪：部署方最需要知道"重启后账号还在不在"。
+    // persistent=false 时创空间的账号数据会在容器重启后丢失，前端要据此提示访客。
+    accounts: {
+      ...signupStatus(),
+      persistent: storeStatus.persistent,
+      reason: storeStatus.reason,
+      users: storeStatus.users,
+      resumes: storeStatus.resumes
+    },
     hostedLlm: {
       enabled: Boolean(HOSTED_LLM_TOKEN),
       model: HOSTED_LLM_TOKEN ? HOSTED_LLM_MODEL : "",
@@ -562,13 +538,19 @@ async function handleHealth(req, res) {
   sendJson(res, 200, payload);
 }
 
-export function createApiHandlers() {
+// 每个路由允许的 HTTP 方法：默认只允许 POST（沿用原有约定），
+// 读取类接口（会话自检、简历列表、数据导出）单独放开 GET。
+export const API_ROUTE_METHODS = { ...ACCOUNT_ROUTE_METHODS };
+
+export function createApiHandlers({ store = null } = {}) {
+  activeStore = store;
   return {
     "/api/llm": handleLlm,
     "/api/parse-resume": handleResumeParse,
     "/api/edge-tts": handleEdgeTts,
     "/api/asr": handleAsr,
-    "/api/health": handleHealth
+    "/api/health": handleHealth,
+    ...createAccountHandlers({ store })
   };
 }
 

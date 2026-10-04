@@ -7,10 +7,12 @@ export default function SplashView({ onEnter }) {
 
   useEffect(() => {
     const show = window.setTimeout(() => setVisible(true), 80);
-    const timer = window.setTimeout(() => onEnter(), 3200);
+    // onEnter 缺省时（启动阶段还在确认登录态）只展示，不自动跳转，
+    // 否则会把已登录的访客"自动送"到登录页。
+    const timer = onEnter ? window.setTimeout(() => onEnter(), 3200) : null;
     return () => {
       window.clearTimeout(show);
-      window.clearTimeout(timer);
+      if (timer) window.clearTimeout(timer);
     };
   }, [onEnter]);
 

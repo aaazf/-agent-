@@ -9,7 +9,8 @@ import {
   Mic2,
   Palette,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  UserRound
 } from "lucide-react";
 import LoginView from "./components/LoginView.jsx";
 import WorkbenchPage from "./components/WorkbenchPage.jsx";
@@ -23,7 +24,22 @@ import SplashView from "./components/SplashView.jsx";
 import DeviceSetupPage from "./components/DeviceSetupPage.jsx";
 import ThemePalette from "./components/ThemePalette.jsx";
 import EmbedNotice from "./components/EmbedNotice.jsx";
-import { DEFAULT_SETTINGS, clearLocalData, deleteResult, loadHistory, loadSettings, saveSettings } from "./lib/storage.js";
+import { logoutAccount, restoreSession } from "./lib/auth.js";
+import {
+  DEFAULT_SETTINGS,
+  adoptLegacyLocalData,
+  clearLocalData,
+  clearStorageScope,
+  deleteResult,
+  hasOnboarded,
+  loadHistory,
+  loadSettings,
+  loadTheme,
+  markOnboarded,
+  saveSettings,
+  saveTheme,
+  setStorageScope
+} from "./lib/storage.js";
 import { dataFlowCompact } from "./lib/privacy.js";
 
 const NAV_GROUPS = [
@@ -46,8 +62,11 @@ const NAV_GROUPS = [
 
 export default function App() {
   const [bootStage, setBootStage] = useState("splash");
-  const [authed, setAuthed] = useState(false);
-  const [theme, setTheme] = useState("black");
+  // authState: checking = 正在用本机 token 向服务端确认登录态
+  const [authState, setAuthState] = useState("checking");
+  const [user, setUser] = useState(null);
+  const [authNotice, setAuthNotice] = useState("");
+  const [theme, setTheme] = useState(() => loadTheme() || "black");
   const [page, setPage] = useState("workbench");
   const [settings, setSettings] = useState(() => loadSettings());
   const [history, setHistory] = useState(() => loadHistory());
@@ -56,8 +75,63 @@ export default function App() {
   const [onboardingStep, setOnboardingStep] = useState(1);
 
   useEffect(() => {
-    localStorage.setItem("guide-theme", theme);
+    saveTheme(theme);
   }, [theme]);
+
+  // 启动时恢复登录态。三种结果要分开处理：确认登录 → 直接进工作台；
+  // 没有有效会话 → 落到登录页；服务端连不上 → 也去登录页，但要说明原因，
+  // 不能让访客以为"我的账号被清空了"。
+  useEffect(() => {
+    let alive = true;
+    restoreSession().then((result) => {
+      if (!alive) return;
+      if (result.status === "authenticated") {
+        enterAccount(result.user);
+        return;
+      }
+      if (result.status === "offline") {
+        setAuthNotice(`暂时无法连接服务端（${result.error}），登录与简历保存需要服务端可用。`);
+      }
+      setAuthState("anonymous");
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // 切换账号作用域：本机的设置/记录/中场快照都跟着账号走，
+  // 顺手把登录前留下的无后缀老数据认领到当前账号。
+  function enterAccount(nextUser) {
+    setStorageScope(nextUser?.id);
+    adoptLegacyLocalData();
+    setUser(nextUser);
+    setAuthState("authed");
+    setBootStage("app");
+    setSettings(loadSettings());
+    setHistory(loadHistory());
+    setCurrentResult(null);
+    setSummaryTab("records");
+    setPage(hasOnboarded() ? "workbench" : "onboarding");
+    setOnboardingStep(1);
+    setAuthNotice("");
+  }
+
+  function handleAuthed(nextUser) {
+    enterAccount(nextUser);
+  }
+
+  async function handleLogout() {
+    await logoutAccount();
+    clearStorageScope();
+    setUser(null);
+    setAuthState("anonymous");
+    setBootStage("login");
+    setSettings({ ...DEFAULT_SETTINGS });
+    setHistory([]);
+    setCurrentResult(null);
+    setSummaryTab("records");
+    setAuthNotice("已退出登录。换账号登录后看到的是各自的简历与记录。");
+  }
 
   const THEMES = [
     { key: "green", label: "青玉绿", color: "#0f766e" },
@@ -70,33 +144,28 @@ export default function App() {
   const themeIndex = THEMES.findIndex((item) => item.key === theme);
   const currentTheme = THEMES[(themeIndex >= 0 ? themeIndex : 0)];
 
-  if (bootStage === "splash") {
+  if (bootStage === "splash" || authState === "checking") {
     return (
       <>
         <SplashView
-          onEnter={() => {
-            setBootStage("login");
-          }}
+          onEnter={
+            // 还在确认登录态时不给入口，避免"刚点进入又被弹回登录页"
+            authState === "checking"
+              ? undefined
+              : () => {
+                  setBootStage("login");
+                }
+          }
         />
         <EmbedNotice />
       </>
     );
   }
 
-  if (!authed) {
+  if (authState !== "authed" || !user) {
     return (
       <>
-        <LoginView
-          onLogin={() => {
-            setAuthed(true);
-            if (localStorage.getItem("agent-onboarded") === "1") {
-              setPage("workbench");
-            } else {
-              setPage("onboarding");
-              setOnboardingStep(1);
-            }
-          }}
-        />
+        <LoginView onAuthed={handleAuthed} notice={authNotice} />
         <EmbedNotice />
       </>
     );
@@ -106,7 +175,7 @@ export default function App() {
   // 直接落到复盘报告页——否则首次访客做完第一场只看到工作台上的卡片，
   // 整场面试唯一的高价值产出（报告）被藏在一次点击之后。
   function completeOnboarding(result) {
-    localStorage.setItem("agent-onboarded", "1");
+    markOnboarded();
     if (result) {
       handleFinish(result);
       return;
@@ -153,7 +222,7 @@ export default function App() {
     const confirmed = window.confirm("确认清除本机数据？面试记录、设置与语音告知确认都会被删除，且无法恢复。");
     if (!confirmed) return;
     clearLocalData();
-    localStorage.setItem("guide-theme", theme);
+    saveTheme(theme);
     setSettings({ ...DEFAULT_SETTINGS });
     setHistory([]);
     setCurrentResult(null);
@@ -249,10 +318,8 @@ export default function App() {
             <ApiAccessView
               settings={settings}
               allowEmpty
-              onBack={() => {
-                setAuthed(false);
-                setBootStage("login");
-              }}
+              onBack={handleLogout}
+              backLabel="← 退出登录"
               onNext={(next) => {
                 saveConfig(next);
                 setOnboardingStep(2);
@@ -364,7 +431,11 @@ export default function App() {
             <ShieldCheck size={13} />
             {dataFlowCompact}
           </div>
-          <button className="guide-logout" onClick={() => setAuthed(false)}>
+          <div className="guide-account" title={user?.account}>
+            <UserRound size={13} />
+            <span>{user?.account || "未登录"}</span>
+          </div>
+          <button className="guide-logout" onClick={handleLogout}>
             <LogOut size={14} />
             退出登录
           </button>

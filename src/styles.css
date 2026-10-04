@@ -6017,3 +6017,171 @@ body,
   margin: 6px 0 0;
   opacity: 0.85;
 }
+
+/* ---------- 登录页：登录 / 注册切换 ---------- */
+.login-tabs {
+  display: flex;
+  gap: 6px;
+  width: min(100%, 720px);
+  margin: 0 auto 20px;
+  padding: 5px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.login-tab {
+  flex: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #9cb0ba;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.login-tab:hover {
+  color: #d8e6eb;
+}
+
+.login-tab.active {
+  background: #15332f;
+  color: #6fd4c6;
+}
+
+.login-error,
+.login-notice {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: min(100%, 720px);
+  margin: 0 auto;
+  padding: 10px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.login-error {
+  border: 1px solid rgba(226, 106, 106, 0.45);
+  background: rgba(226, 106, 106, 0.12);
+  color: #f2b8b8;
+}
+
+.login-notice {
+  border: 1px solid rgba(105, 203, 191, 0.35);
+  background: rgba(105, 203, 191, 0.1);
+  color: #a9d8d1;
+}
+
+.login-note-warn {
+  color: #f0c98a;
+}
+
+/* ---------- 账号级简历库 ---------- */
+.resume-library {
+  display: grid;
+  gap: 11px;
+  padding: 16px 18px;
+}
+
+.resume-library.compact {
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  background: rgba(15, 118, 110, 0.04);
+}
+
+.resume-library-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.resume-library-head h3 {
+  margin: 4px 0 0;
+  font-size: 17px;
+}
+
+.resume-library-head small {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.resume-library-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  opacity: 0.82;
+}
+
+.resume-library-note.warn {
+  color: #c2410c;
+  opacity: 1;
+}
+
+.resume-library-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.resume-library-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.resume-library-meta {
+  min-width: 0;
+}
+
+.resume-library-meta b {
+  display: block;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resume-library-meta small {
+  font-size: 11.5px;
+  opacity: 0.7;
+}
+
+.resume-library-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+/* 侧栏当前登录账号 */
+.guide-account {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: #5c707c;
+  font-size: 12px;
+}
+
+.guide-account span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

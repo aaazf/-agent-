@@ -4,7 +4,8 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { loadDotEnv, projectRoot } from "./env.mjs";
-import { createApiHandlers, warmup } from "./api.mjs";
+import { API_ROUTE_METHODS, createApiHandlers, warmup } from "./api.mjs";
+import { getStore } from "./store.mjs";
 
 loadDotEnv();
 
@@ -100,8 +101,14 @@ async function handleRequest(req, res) {
       send(res, 404, JSON.stringify({ error: "接口不存在" }), { "Content-Type": "application/json; charset=utf-8" });
       return;
     }
-    if (req.method !== "POST") {
-      send(res, 405, JSON.stringify({ error: "仅支持 POST" }), { "Content-Type": "application/json; charset=utf-8" });
+    // 路由各自声明允许的方法：账号体系引入后，会话自检/简历列表需要 GET，
+    // 而写操作仍然只走 POST。
+    const allowed = API_ROUTE_METHODS[urlPath] || ["POST"];
+    if (!allowed.includes(String(req.method || "").toUpperCase())) {
+      send(res, 405, JSON.stringify({ error: `仅支持 ${allowed.join(" / ")}` }), {
+        "Content-Type": "application/json; charset=utf-8",
+        Allow: allowed.join(", ")
+      });
       return;
     }
     await handler(req, res);
@@ -142,6 +149,13 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   warmup();
+  // 启动时就把"数据到底存不存得住"打出来：创空间容器默认没有持久卷，
+  // 这条日志是部署方判断"账号明天还在不在"的第一手线索。
+  const scope = getStore().status();
+  console.log(
+    `[store] ${scope.persistent ? "持久化已启用" : "持久化不可用（容器重启后账号与简历会丢失）"} -> ${scope.file}` +
+      (scope.reason ? `（${scope.reason}）` : "")
+  );
   console.log(`[interview-agent] listening on http://${HOST}:${PORT} (dist=${DIST_DIR})`);
 });
 

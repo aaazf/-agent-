@@ -27,6 +27,22 @@ export function createSlidingWindowLimiter({ windowMs, max }) {
       hits.set(key, times);
       return { ok: true, retryAfterMs: 0 };
     },
+    // 只看不计数：登录流程要先判断"这个账号是不是已经被按住"，
+    // 但把计数留给真正失败的那一次（否则一次成功登录也会消耗配额）。
+    check(key) {
+      const now = Date.now();
+      const times = (hits.get(String(key ?? "")) || []).filter((ts) => now - ts < windowMs);
+      if (times.length >= max) {
+        return { ok: false, retryAfterMs: Math.max(0, windowMs - (now - times[0])) };
+      }
+      return { ok: true, retryAfterMs: 0 };
+    },
+    // 登录成功后清掉该账号的失败计数：否则"手滑输错几次"会一直累计到
+    // 下一次窗口结束，正常用户被自己之前的失误锁在门外。
+    clear(key) {
+      hits.delete(String(key ?? ""));
+      return true;
+    },
     reset() {
       hits.clear();
     }

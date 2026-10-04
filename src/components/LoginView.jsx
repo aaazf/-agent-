@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   BarChart3,
   Bot,
@@ -9,23 +10,84 @@ import {
   KeyRound,
   LockKeyhole,
   Mic,
+  ShieldCheck,
   Sparkles,
-  UserRound,
+  UserRound
 } from "lucide-react";
 import GalaxyCanvas from "./GalaxyCanvas.jsx";
+import { loginAccount, registerAccount, saveToken } from "../lib/auth.js";
 import { dataFlowFull } from "../lib/privacy.js";
+import { fetchHealth } from "../lib/runtime.js";
 
-export default function LoginView({ onLogin }) {
-  const [email, setEmail] = useState("demo@interview.local");
-  const [password, setPassword] = useState("demo");
+export default function LoginView({ onAuthed, notice = "" }) {
+  const [mode, setMode] = useState("login");
+  const [account, setAccount] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [accounts, setAccounts] = useState(null);
 
-  function submit(e) {
+  useEffect(() => {
+    let alive = true;
+    // 注册开关/邀请码/持久化能力都由服务端告诉我们，避免前后端两套默认值。
+    fetchHealth().then((health) => {
+      if (alive) setAccounts(health?.accounts || null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const signupOpen = accounts ? accounts.signup !== false : true;
+  const inviteRequired = Boolean(accounts?.inviteRequired);
+
+  async function submit(e) {
     e.preventDefault();
+    if (loading) return;
+    setError("");
+    const name = account.trim();
+    if (!name) {
+      setError("请输入账号（邮箱或用户名）");
+      return;
+    }
+    if (!password) {
+      setError("请输入密码");
+      return;
+    }
+    if (mode === "register") {
+      if (!signupOpen) {
+        setError("本站当前未开放注册。");
+        return;
+      }
+      if (password.length < 8) {
+        setError("密码至少 8 位，且同时包含字母和数字。");
+        return;
+      }
+      if (password !== confirm) {
+        setError("两次输入的密码不一致。");
+        return;
+      }
+    }
     setLoading(true);
-    window.setTimeout(() => {
-      onLogin({ email, password });
-    }, 420);
+    try {
+      const data =
+        mode === "register"
+          ? await registerAccount({ account: name, password, inviteCode: inviteCode.trim() })
+          : await loginAccount({ account: name, password });
+      saveToken(data.token);
+      onAuthed(data.user);
+    } catch (err) {
+      setError(err?.message || "操作失败，请稍后重试。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function switchMode(next) {
+    setMode(next);
+    setError("");
   }
 
   return (
@@ -41,7 +103,7 @@ export default function LoginView({ onLogin }) {
         </div>
         <span className="login-badge">
           <LockKeyhole size={13} />
-          本地演示环境
+          账号登录 · 简历随账号保存
         </span>
       </header>
 
@@ -74,18 +136,53 @@ export default function LoginView({ onLogin }) {
               <UserRound size={20} />
             </span>
             <div>
-              <h2>进入面试工作台</h2>
-              <p>演示阶段跳过真实鉴权，点击继续进入面试中心；模型接入在系统设置中单独提供。</p>
+              <h2>{mode === "register" ? "创建账号，开始练习" : "登录面试工作台"}</h2>
+              <p>
+                {mode === "register"
+                  ? "用户名或邮箱都可以，不需要邮箱验证码；账号只用来给你单独保存简历与练习记录。"
+                  : "每个账号的简历、面试记录与设置互相隔离，换设备登录也能找回自己的简历。"}
+              </p>
             </div>
           </div>
+
+          {signupOpen ? (
+            <div className="login-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                data-mode="login"
+                aria-selected={mode === "login"}
+                className={`login-tab ${mode === "login" ? "active" : ""}`}
+                onClick={() => switchMode("login")}
+              >
+                登录
+              </button>
+              <button
+                type="button"
+                role="tab"
+                data-mode="register"
+                aria-selected={mode === "register"}
+                className={`login-tab ${mode === "register" ? "active" : ""}`}
+                onClick={() => switchMode("register")}
+              >
+                注册新账号
+              </button>
+            </div>
+          ) : null}
 
           <form onSubmit={submit}>
             <label>
               <span>
                 <UserRound size={14} />
-                邮箱 / 用户名
+                账号（邮箱或用户名）
               </span>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="demo@interview.local" />
+              <input
+                className="login-account"
+                value={account}
+                autoComplete="username"
+                onChange={(e) => setAccount(e.target.value)}
+                placeholder="例如 zhangsan 或 zhangsan@example.com"
+              />
             </label>
             <label>
               <span>
@@ -93,29 +190,60 @@ export default function LoginView({ onLogin }) {
                 密码
               </span>
               <input
+                className="login-password"
                 type="password"
                 value={password}
+                autoComplete={mode === "register" ? "new-password" : "current-password"}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="演示环境任意输入"
+                placeholder={mode === "register" ? "至少 8 位，含字母和数字" : "输入账号密码"}
               />
             </label>
+            {mode === "register" ? (
+              <>
+                <label>
+                  <span>
+                    <ShieldCheck size={14} />
+                    确认密码
+                  </span>
+                  <input
+                    className="login-confirm"
+                    type="password"
+                    value={confirm}
+                    autoComplete="new-password"
+                    onChange={(e) => setConfirm(e.target.value)}
+                    placeholder="再输入一次密码"
+                  />
+                </label>
+                {inviteRequired ? (
+                  <label>
+                    <span>
+                      <KeyRound size={14} />
+                      邀请码
+                    </span>
+                    <input
+                      className="login-invite"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value)}
+                      placeholder="部署方提供的邀请码"
+                    />
+                  </label>
+                ) : null}
+              </>
+            ) : null}
+
+            {error ? (
+              <p className="login-error" role="alert">
+                <AlertTriangle size={14} />
+                {error}
+              </p>
+            ) : null}
+            {notice && !error ? <p className="login-notice">{notice}</p> : null}
+
             <button className="primary-btn login-submit" disabled={loading}>
               {loading ? <span className="mini-loader" /> : <ArrowRight size={18} />}
-              {loading ? "正在进入…" : "登录并进入面试中心"}
+              {loading ? "正在处理…" : mode === "register" ? "注册并进入面试中心" : "登录并进入面试中心"}
             </button>
           </form>
-
-          <div className="login-demo-row">
-            <span>演示账号</span>
-            <code>demo@interview.local / demo</code>
-            <button type="button" onClick={() => {
-              setEmail("demo@interview.local");
-              setPassword("demo");
-            }}>
-              <CheckCircle2 size={14} />
-              一键填入
-            </button>
-          </div>
 
           <div className="login-features">
             <div>
@@ -140,13 +268,13 @@ export default function LoginView({ onLogin }) {
             </div>
             <div>
               <FileCheck2 size={18} />
-              <b>逐题复盘</b>
-              <small>每题给出可执行改进方案</small>
+              <b>简历随账号走</b>
+              <small>换设备登录也能找回自己的简历</small>
             </div>
             <div>
               <CheckCircle2 size={18} />
-              <b>本机留存</b>
-              <small>记录只存本机，可一键清除</small>
+              <b>账号互相隔离</b>
+              <small>同一台电脑换人登录互不可见</small>
             </div>
           </div>
 
@@ -154,6 +282,12 @@ export default function LoginView({ onLogin }) {
             <Sparkles size={13} />
             {dataFlowFull}
           </p>
+          {accounts && accounts.persistent === false ? (
+            <p className="login-note login-note-warn">
+              <AlertTriangle size={13} />
+              当前部署未挂载持久化存储，容器重启后账号与简历可能丢失，请勿存放重要个人信息。
+            </p>
+          ) : null}
         </section>
       </main>
     </div>

@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { analyzeResumeLocal } from "../lib/resume.js";
 import { analyzeResumeWithModel, canUseModel } from "../lib/model.js";
+import { saveResume } from "../lib/resumes.js";
+import ResumeLibrary from "./ResumeLibrary.jsx";
 
 const DIRECTIONS = [
   "互联网",
@@ -183,6 +185,36 @@ export default function ResumeSetupView({
     await runResumeAnalysis(form, form.resume);
   }
 
+  // 载入账号里的某份简历：整块替换表单内容，并沿用那份简历的分析结果。
+  function loadResume(resume) {
+    setForm((prev) => ({
+      ...prev,
+      role: resume.role || prev.role,
+      direction: resume.direction || prev.direction,
+      resume: resume.text || "",
+      jd: resume.jd || ""
+    }));
+    setAnalysis(resume.analysis || null);
+    setAnalysisState(resume.analysis ? "ok" : "idle");
+    setUploadMsg("");
+    setUploadState("idle");
+  }
+
+  // 点"开始面试"时顺手把当前简历存进账号：访客不用再单独点一次保存，
+  // 失败也不该挡住面试，所以这里只吞掉错误。
+  function startInterview() {
+    const payload = { ...form, resumeAnalysis: analysis };
+    saveResume({
+      title: `${form.direction}·${form.role}`,
+      role: form.role,
+      direction: form.direction,
+      text: form.resume,
+      jd: form.jd,
+      analysis
+    }).catch(() => {});
+    onStart(payload);
+  }
+
   return (
     <div className="module-page resume-page">
       <div className="module-heading">
@@ -198,6 +230,10 @@ export default function ResumeSetupView({
 
       <div className="resume-layout">
         <div className="resume-main">
+          <ResumeLibrary
+            current={{ title: `${form.direction}·${form.role}`, role: form.role, direction: form.direction, text: form.resume, jd: form.jd, analysis }}
+            onLoad={loadResume}
+          />
           <section className="panel">
             <div className="api-section-title">
               <UserRound size={18} />
@@ -431,7 +467,7 @@ export default function ResumeSetupView({
           </div>
           <button
             className="primary-btn wide next-btn"
-            onClick={() => onStart({ ...form, resumeAnalysis: analysis })}
+            onClick={startInterview}
             disabled={!form.resume.trim() || !form.jd.trim()}
           >
             <Play size={17} fill="currentColor" />

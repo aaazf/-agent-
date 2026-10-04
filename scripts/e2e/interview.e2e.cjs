@@ -9,6 +9,8 @@
 //   B. 真实 http 宿主页内嵌且父页未授权：出现内嵌提示、麦克风被拒、文字面试仍完整可用
 //   C. 宿主页带 allow="microphone; camera"：内嵌窗口也能拿到麦克风并启动语音识别
 //   D. 服务端语音识别全链路：真实录音 -> /api/asr -> 上游 multipart -> 转写文字 -> 面试推进到下一题
+//   E. 共享额度路径：访客不填 Key 也真的走模型（出题、追问、整场评分）
+//   F. 账号体系：注册 -> 简历存进账号 -> 刷新免密恢复 -> 账号之间互相隔离 -> 退出登录
 //
 // 用法：
 //   npm run build && npm run e2e
@@ -152,7 +154,9 @@ function startStubUpstream() {
   return new Promise((resolve) => server.listen(ASR_PORT, "127.0.0.1", () => resolve({ server, received })));
 }
 
-async function startAppServer({ port = APP_PORT, extraEnv = {} } = {}) {
+// 每个实例都用自己的数据文件：两个进程共享一个文件的话，
+// 各自持有一份内存镜像再整包写回，后写的会盖掉前面的账号。
+async function startAppServer({ port = APP_PORT, extraEnv = {}, storeFile = path.join(process.env.TEMP || "/tmp", `ia-e2e-store-${port}.json`) } = {}) {
   const base = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["server/index.mjs"], {
     cwd: process.cwd(),
@@ -160,6 +164,7 @@ async function startAppServer({ port = APP_PORT, extraEnv = {} } = {}) {
       ...process.env,
       HOST: "127.0.0.1",
       PORT: String(port),
+      STORE_FILE: storeFile,
       ASR_BASE_URL: `http://127.0.0.1:${ASR_PORT}/v1`,
       ASR_MODEL: "stub-asr",
       ASR_TOKEN: "stub-token",
@@ -203,6 +208,50 @@ async function clickByText(target, text) {
   const el = handle.asElement();
   if (!el) throw new Error(`找不到包含「${text}」的按钮`);
   await el.click();
+}
+
+const E2E_PASSWORD = "interview2026";
+let accountSeq = 0;
+
+function newAccount(prefix) {
+  accountSeq += 1;
+  return `${prefix}${Date.now().toString(36)}${accountSeq}`;
+}
+
+// 停在"登录表单"或"已经进入应用"都算就绪：刷新后被恢复会话的访客不会再看到登录页。
+async function waitForAuthStage(target, timeoutMs = 25000) {
+  await target.waitForFunction(
+    () => {
+      if (document.querySelector(".login-submit")) return true;
+      const text = document.body.innerText;
+      return (
+        text.includes("选择并接入大模型") ||
+        text.includes("岗位与简历材料") ||
+        text.includes("设备检测与面试类型") ||
+        text.includes("今天想练哪一场") ||
+        text.includes("本场复盘报告")
+      );
+    },
+    { timeout: timeoutMs, polling: 200 }
+  );
+}
+
+// 没有登录态才注册；已经有会话（刷新后自动恢复）就直接放行。
+// 返回本次真正注册的账号名，空串表示复用了已有会话。
+async function ensureSignedIn(target, { prefix = "e2e" } = {}) {
+  const splash = await target.$(".splash-enter");
+  if (splash) await splash.click();
+  await waitForAuthStage(target);
+  const hasForm = await target.evaluate(() => Boolean(document.querySelector(".login-submit")));
+  if (!hasForm) return "";
+  const account = newAccount(prefix);
+  await target.click('.login-tab[data-mode="register"]');
+  await target.type(".login-account", account);
+  await target.type(".login-password", E2E_PASSWORD);
+  await target.type(".login-confirm", E2E_PASSWORD);
+  await target.click(".login-submit");
+  await waitForAuthStage(target);
+  return account;
 }
 
 async function readBadge(target) {
@@ -280,10 +329,7 @@ async function probeMic(target) {
 // 面试形式会写进 localStorage，所以调用方必须显式指定，避免被上一段用例的残留设置带偏。
 // keepOffer=true 时保留"上一场没面完"的恢复面板，交给恢复用例自己断言。
 async function goToInterview(target, { mode, keepOffer = false } = {}) {
-  const splash = await target.$(".splash-enter");
-  if (splash) await splash.click();
-  await target.waitForSelector(".login-submit", { timeout: 20000 });
-  await target.click(".login-submit");
+  await ensureSignedIn(target);
   await target.waitForFunction(() => document.body.innerText.includes("选择并接入大模型"), { timeout: 20000 });
   await clickByText(target, "暂不接入，本地题库继续");
   await target.waitForFunction(() => document.body.innerText.includes("岗位与简历材料"), { timeout: 20000 });
@@ -398,10 +444,7 @@ async function runVoiceAsrInterview(target, prefix) {
 // 共享额度路径：访客不填 Key，也必须真的走模型。这是托管额度存在的全部意义，
 // 而此前出题与评分都拿 settings.apiKey 当门槛，这条路整场落到本地题库。
 async function runHostedModelInterview(target, prefix, stub) {
-  const splash = await target.$(".splash-enter");
-  if (splash) await splash.click();
-  await target.waitForSelector(".login-submit", { timeout: 20000 });
-  await target.click(".login-submit");
+  await ensureSignedIn(target);
   await target.waitForFunction(() => document.body.innerText.includes("选择并接入大模型"), { timeout: 20000 });
   await target.waitForFunction(() => document.body.innerText.includes("共享体验额度"), { timeout: 20000 });
   const ghost = await target.evaluate(() =>
@@ -491,6 +534,99 @@ async function runHostedModelInterview(target, prefix, stub) {
     asks.length > 0 && asks[0].auth === `Bearer ${HOSTED_TOKEN}` && asks[0].body.includes(HOSTED_MODEL),
     asks.length ? `${asks[0].auth || "无鉴权头"} / ${asks[0].body.includes(HOSTED_MODEL) ? HOSTED_MODEL : "未使用托管模型"}` : "无请求"
   );
+}
+
+// 页面里带 token 直连服务端查询：用来证明"简历真的存在服务端"，
+// 而不是只被前端渲染出来。
+async function readServerResumes(target) {
+  return target.evaluate(async () => {
+    const token = localStorage.getItem("face-interview-auth-token-v1");
+    if (!token) return { error: "没有 token", count: -1 };
+    const res = await fetch("/api/resumes", { headers: { Authorization: `Bearer ${token}` } });
+    const data = await res.json();
+    return { status: res.status, count: (data.resumes || []).length, titles: (data.resumes || []).map((item) => item.title) };
+  });
+}
+
+// 新账号会落在首次引导的第 1 步，"暂不接入"就能走到带简历库的第 2 步。
+async function goToResumeStep(target) {
+  await target.waitForFunction(() => document.body.innerText.includes("选择并接入大模型"), { timeout: 25000 });
+  await clickByText(target, "暂不接入，本地题库继续");
+  await target.waitForFunction(() => document.body.innerText.includes("岗位与简历材料"), { timeout: 25000 });
+}
+
+async function listLibraryTitles(target) {
+  return target.evaluate(() =>
+    Array.from(document.querySelectorAll(".resume-library-list li b")).map((node) => node.textContent.trim())
+  );
+}
+
+// F. 账号体系：注册 -> 简历进账号 -> 刷新免密恢复 -> 账号互相隔离 -> 退出登录
+async function runAccountFlow(browser, prefix) {
+  const context = await browser.createBrowserContext();
+  const second = await browser.createBrowserContext();
+  const page = await context.newPage();
+  try {
+    page.on("dialog", (dialog) => dialog.accept());
+    await page.goto(BASE, { waitUntil: "networkidle2", timeout: 30000 });
+    const account = await ensureSignedIn(page, { prefix: "acctA" });
+    check(`${prefix}1 注册新账号后直接进入应用（不需要邮箱验证）`, Boolean(account), account);
+    await goToResumeStep(page);
+
+    const fresh = await page.evaluate(() => document.body.innerText.includes("还没有保存过简历"));
+    check(`${prefix}2 新账号的简历库是空的`, fresh);
+
+    await clickByText(page, "保存当前简历");
+    await page.waitForFunction(() => document.body.innerText.includes("已保存到账号"), { timeout: 25000 });
+    // "已保存到账号"在列表刷新（第二次请求）之前就出现了，所以要单独等列表项渲染出来
+    await page.waitForSelector(".resume-library-list li", { timeout: 15000 });
+    const listed = await listLibraryTitles(page);
+    const stored = await readServerResumes(page);
+    check(
+      `${prefix}3 简历保存进账号并落到服务端`,
+      listed.length === 1 && stored.count === 1,
+      `列表=${listed.join(",")} 服务端=${stored.count}`
+    );
+
+    // 刷新：既要免密恢复登录态，也要把简历从服务端取回来
+    await page.reload({ waitUntil: "networkidle2", timeout: 30000 });
+    await goToResumeStep(page);
+    const afterReload = await listLibraryTitles(page);
+    const loginForm = await page.$(".login-submit");
+    check(`${prefix}4 刷新后自动恢复登录态，不用重新输密码`, loginForm === null);
+    check(`${prefix}5 刷新后简历仍在（存在服务端，不是本机缓存）`, afterReload.length === 1, afterReload.join(","));
+
+    // 同一台服务器、同一个浏览器上的第二个账号，必须看不到第一个账号的简历
+    const pageB = await second.newPage();
+    await pageB.goto(BASE, { waitUntil: "networkidle2", timeout: 30000 });
+    const accountB = await ensureSignedIn(pageB, { prefix: "acctB" });
+    await goToResumeStep(pageB);
+    const listB = await listLibraryTitles(pageB);
+    const storedB = await readServerResumes(pageB);
+    check(
+      `${prefix}6 另一个账号看不到第一个账号的简历`,
+      Boolean(accountB) && listB.length === 0 && storedB.count === 0,
+      `账号=${accountB} 列表=${listB.length} 服务端=${storedB.count}`
+    );
+
+    // 回到 A：删除简历，再退出登录
+    await clickByText(page, "删除");
+    await page.waitForFunction(() => document.body.innerText.includes("还没有保存过简历"), { timeout: 25000 });
+    const afterDelete = await readServerResumes(page);
+    check(`${prefix}7 删除简历后服务端也不再保留`, afterDelete.count === 0, `服务端=${afterDelete.count}`);
+
+    await clickByText(page, "返回 API 接入");
+    await page.waitForFunction(() => document.body.innerText.includes("选择并接入大模型"), { timeout: 20000 });
+    await clickByText(page, "退出登录");
+    await page.waitForSelector(".login-submit", { timeout: 25000 });
+    const token = await page.evaluate(() => localStorage.getItem("face-interview-auth-token-v1"));
+    check(`${prefix}8 退出登录回到登录页并清掉本机 token`, !token);
+  } catch (err) {
+    check(`${prefix} 账号流程执行`, false, err.message);
+  } finally {
+    await second.close();
+    await context.close();
+  }
 }
 
 (async () => {
@@ -614,6 +750,9 @@ async function runHostedModelInterview(target, prefix, stub) {
         JSON.stringify(audio[0] ? { url: audio[0].url, auth: audio[0].auth, bytes: audio[0].bytes } : {})
       );
       await voiceContext.close();
+
+      // 独立上下文跑账号流程：和 A/B/C 的本机数据完全隔离。
+      await runAccountFlow(browser, "F");
 
       // 另起一个开了托管额度的实例，复现"社区访客不填 Key"的场景。
       hostedApp = await startAppServer({

@@ -220,7 +220,7 @@ describe("voice consent and local data control", () => {
     expect(loadConsent()).toEqual({ voiceUpload: false });
   });
 
-  it("clearLocalData 清掉记录、设置、确认状态与引导标记", () => {
+  it("clearLocalData 清掉记录、设置、确认状态、引导标记与主题偏好", () => {
     saveConsent({ voiceUpload: true });
     localStorage.setItem("face-interview-history-v1", "[]");
     localStorage.setItem("face-interview-settings-v1", "{}");
