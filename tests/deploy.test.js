@@ -141,11 +141,23 @@ describe("部署文档与环境变量样例不腐化", () => {
   // 创空间默认模板是 Gradio/Streamlit，选错 SDK 会去找 app.py，
   // 本项目靠根目录 Dockerfile 启动，所以这条必须写在文档最显眼的位置。
   it("部署文档把「SDK 必须选 Docker」写清楚了", () => {
-    expect(deployDoc).toMatch(/类型选 \*\*Docker\*\*/);
+    expect(deployDoc).toMatch(/「接入 SDK」里选 \*\*Docker\*\*/);
     expect(deployDoc).toContain("不要选 Gradio / Streamlit");
     expect(deployDoc).toContain("SdkType");
     // 仓库根目录必须有 Dockerfile，否则 Docker 类型也无从启动
     expect(read("Dockerfile")).toMatch(/EXPOSE\s+7860/);
+  });
+
+  // 这几条是从平台自己的接口/前端代码里核实过的，别再写成"设置页能改 SDK"这种想当然的话。
+  it("部署文档如实写明平台的 SDK 约束与自查地址", () => {
+    expect(deployDoc).toContain("SDK 类型创建后不能改");
+    expect(deployDoc).toContain("deploy_schema.json");
+    expect(deployDoc).toContain("isAuthAliyunVerified");
+    expect(deployDoc).toContain("只有 `gradio / streamlit / static / docker` 四种");
+    // 平台要求 docker 型监听 0.0.0.0:7860，我们的 Dockerfile 必须与之一致
+    const dockerfile = read("Dockerfile");
+    expect(dockerfile).toMatch(/PORT=7860/);
+    expect(dockerfile).toMatch(/HOST=0\.0\.0\.0/);
   });
 
   it("文档写的 E2E 断言条数不落后于脚本（加用例就得改文档）", () => {

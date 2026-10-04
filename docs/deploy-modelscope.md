@@ -37,21 +37,23 @@
 
 ## 3. 创建创空间
 
-1. 打开 `https://modelscope.cn/studios` → 新建创空间。
-2. 类型选 **Docker**（**不要选 Gradio / Streamlit**：本项目的入口是仓库根目录的 `Dockerfile`，选错 SDK 平台会去找 `app.py`，部署必然起不来），端口填 **7860**，可见性选"公开"（只有公开才允许被 `iframe` 嵌入）。已经建错了不用重来：打开「创空间设置」把 SDK 类型改成 Docker 再保存；若平台不允许改，就新建一个 Docker 类型的创空间。
-   自查方法：`curl -s https://www.modelscope.cn/api/v1/studio/<用户名>/<空间名>`，其中 `SdkType` 应为 `docker`（显示 `gradio` / `streamlit` 就是选错了），`Status` 不应长期停在 `Empty`。
-3. 把本仓库推到创空间的 Git 仓库：
+1. 打开 `https://modelscope.cn/studios` → 新建创空间（或在已有空间上「复刻」，两者是同一个表单）。
+2. 在「接入 SDK」里选 **Docker**，**不要选 Gradio / Streamlit**：本项目的入口是仓库根目录的 `Dockerfile`，选成 Gradio 时平台会去找 `app.py`，部署必然起不来。端口固定 **7860**（docker 型不允许改成别的），可见性选"公开"（只有公开才允许被 `iframe` 嵌入）。
+   - **Docker 选项是灰的？** 平台的判断是"国际站，或账号已绑定阿里云并通过实名认证"（前端判定 `isAuthAliyunVerified`）。去 `https://www.modelscope.cn/auth/platform/open` 完成绑定 + 实名认证后即可选中。
+   - **SDK 类型创建后不能改**：「编辑创空间」和「创空间设置」页都只读展示 SDK，没有选择入口，所以别在编辑页里找。已经用 Gradio 建好了也不用重来：详情页的「部署设置」会按仓库内容自动判断类型——根目录有 `Dockerfile` 就按 docker 部署，选好实例与端口点部署即可。
+3. 平台侧的部署约束（可自查 `curl -s https://www.modelscope.cn/api/v1/studios/deploy_schema.json`）：`sdk_type` 只有 `gradio / streamlit / static / docker` 四种；**docker = 用仓库根目录的 `Dockerfile` 构建镜像，服务必须监听 `0.0.0.0:7860`**，此时不用也不能设 `sdk_version` / `base_image`，`port` 必须恰好是 `7860`。本项目正是按这条写的（`Dockerfile` 里 `HOST=0.0.0.0`、`PORT=7860`）。环境变量也在这个「部署设置」面板里填，一次配好。
+4. 把本仓库推到创空间的 Git 仓库（分支用 `master`，创空间默认分支就是它）：
 
 ```bash
 git remote add modelscope <创空间 Git 地址>
-git push modelscope main
+git push modelscope main:master
 ```
 
-4. 创空间会执行仓库根目录的 `Dockerfile`：安装 `python3 + edge-tts` → `npm ci` → `npm run build` → `npm start`。
+5. 部署后创空间会执行仓库根目录的 `Dockerfile`：安装 `python3 + edge-tts` → `npm ci` → `npm run build` → `npm start`。自查：`curl -s https://www.modelscope.cn/api/v1/studio/<用户名>/<空间名>`，看 `SdkType` / `Status` / `FailedMessage` 三个字段——`Status` 不应长期停在 `Empty`，`FailedMessage` 应为空。
 
-## 4. 在创空间设置环境变量
+## 4. 配置环境变量
 
-在创空间的"环境变量/密钥"面板配置（**不要写进代码或 `.env` 提交**）：
+在创空间的「部署设置」里填 `environment_variables`（就是第 3 步那个面板；**不要写进代码或 `.env` 提交**）：
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
