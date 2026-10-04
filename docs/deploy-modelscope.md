@@ -38,7 +38,8 @@
 ## 3. 创建创空间
 
 1. 打开 `https://modelscope.cn/studios` → 新建创空间。
-2. 类型选 **Docker**，端口填 **7860**，可见性选"公开"（只有公开才允许被 `iframe` 嵌入）。
+2. 类型选 **Docker**（**不要选 Gradio / Streamlit**：本项目的入口是仓库根目录的 `Dockerfile`，选错 SDK 平台会去找 `app.py`，部署必然起不来），端口填 **7860**，可见性选"公开"（只有公开才允许被 `iframe` 嵌入）。已经建错了不用重来：打开「创空间设置」把 SDK 类型改成 Docker 再保存；若平台不允许改，就新建一个 Docker 类型的创空间。
+   自查方法：`curl -s https://www.modelscope.cn/api/v1/studio/<用户名>/<空间名>`，其中 `SdkType` 应为 `docker`（显示 `gradio` / `streamlit` 就是选错了），`Status` 不应长期停在 `Empty`。
 3. 把本仓库推到创空间的 Git 仓库：
 
 ```bash
