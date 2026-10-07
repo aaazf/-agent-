@@ -3056,6 +3056,44 @@ body,
   box-shadow: none !important;
 }
 
+/* 面试页漏在深色主题之外的一组面板：它们还是浅色底，文字却是深色主题的浅色，
+   「曜石黑」下等于白底白字（实测对比度 1.1，题面几乎看不见）。
+   注意两套外壳都要覆盖：首次引导走 .onboarding-shell，老用户走 .guide-shell.theme-black。 */
+.guide-shell.theme-black .stage-card,
+.guide-shell.theme-black .question-card,
+.guide-shell.theme-black .interview-status,
+.guide-shell.theme-black .buffer-rail,
+.guide-shell.theme-black .voice-ready-panel,
+.guide-shell.theme-black .camera-placeholder,
+.guide-shell.theme-black .resume-panel,
+.onboarding-shell .stage-card,
+.onboarding-shell .question-card,
+.onboarding-shell .interview-status,
+.onboarding-shell .buffer-rail,
+.onboarding-shell .voice-ready-panel,
+.onboarding-shell .camera-placeholder,
+.onboarding-shell .resume-panel {
+  background: #0b0f12 !important;
+  border-color: #273139 !important;
+  box-shadow: none !important;
+}
+
+.guide-shell.theme-black .camera-placeholder,
+.guide-shell.theme-black .text-dialogue-empty,
+.onboarding-shell .camera-placeholder,
+.onboarding-shell .text-dialogue-empty {
+  color: #9db0ba !important;
+}
+
+.guide-shell.theme-black .qa-strip > span:first-child,
+.guide-shell.theme-black .answer-area label > span,
+.guide-shell.theme-black .stage-title,
+.onboarding-shell .qa-strip > span:first-child,
+.onboarding-shell .answer-area label > span,
+.onboarding-shell .stage-title {
+  color: #e7eef2 !important;
+}
+
 .guide-shell.theme-black input,
 .guide-shell.theme-black select,
 .guide-shell.theme-black textarea,
