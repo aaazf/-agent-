@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { evaluateAuthBoundary, evaluateHealth, evaluatePage, summarize } from "../scripts/preflight.mjs";
+import {
+  evaluateAuthBoundary,
+  evaluateAuthRoundTrip,
+  evaluateHealth,
+  evaluatePage,
+  evaluateProbeCleanup,
+  summarize
+} from "../scripts/preflight.mjs";
 
 const HEALTHY = {
   ok: true,
@@ -127,5 +134,30 @@ describe("部署自检", () => {
     const leaked = summarize(evaluateAuthBoundary({ me: 401, resumes: 200 }));
     expect(leaked.ok).toBe(false);
     expect(leaked.failed.map((item) => item.name)).toEqual(["认证边界 · 简历读取"]);
+  });
+
+  it("登录态往返：带 X-Auth-Token 读不到账号就判为必须处理（登录后会被弹回登录页）", () => {
+    const ok = summarize(evaluateAuthRoundTrip({ customHeader: 200, bearer: 403 }));
+    expect(ok.ok).toBe(true);
+    const broken = summarize(evaluateAuthRoundTrip({ customHeader: 401, bearer: 403 }));
+    expect(broken.ok).toBe(false);
+    expect(broken.failed.map((item) => item.name)).toEqual(["登录态 · X-Auth-Token"]);
+    expect(broken.failed[0].detail).toContain("弹回登录页");
+  });
+
+  it("登录态往返：Authorization 被网关拦成 403 只是记录现象，不算失败", () => {
+    const item = evaluateAuthRoundTrip({ customHeader: 200, bearer: 403 }).find(
+      (entry) => entry.name === "网关行为 · Authorization 头"
+    );
+    expect(item.ok).toBe(true);
+    expect(item.required).toBe(false);
+    expect(item.detail).toContain("403");
+  });
+
+  it("一次性探针账号必须注销干净，且注销后旧 token 立即失效", () => {
+    expect(summarize(evaluateProbeCleanup({ deleted: 200, afterDelete: 401 })).ok).toBe(true);
+    const dirty = summarize(evaluateProbeCleanup({ deleted: 403, afterDelete: 200 }));
+    expect(dirty.ok).toBe(false);
+    expect(dirty.failed.map((item) => item.name)).toEqual(["探针账号清理", "注销后会话失效"]);
   });
 });

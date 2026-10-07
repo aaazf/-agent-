@@ -5,6 +5,10 @@
 //   npm run preflight                          # 检查本地 http://127.0.0.1:7860
 //   npm run preflight -- https://<创空间域名>    # 检查已部署的创空间
 //
+// 登录态往返核验默认用一个一次性账号：注册 → 读登录态 → 立刻注销，不在体验站里留垃圾数据。
+// 想换成自己的探针账号：PREFLIGHT_ACCOUNT=<账号> PREFLIGHT_PASSWORD=<密码> npm run preflight -- <域名>
+// 不想让预检写数据库（跳过一次性账号那一步）：PREFLIGHT_NO_SIGNUP=1
+//
 // 退出码非 0 表示有"必须处理"的项。WARN 项都有可用的降级路径，按需处理。
 import { pathToFileURL } from "node:url";
 
@@ -141,6 +145,39 @@ export function evaluateAuthBoundary({ me, resumes } = {}) {
   ];
 }
 
+// 纯函数：登录态往返核验（登进去之后，登录态到底还能不能用）。
+// 只验"不带 token → 401"是个假安心：ModelScope 创空间的边缘网关会拦掉非空的
+// Authorization 头，直接回 403，请求根本到不了应用。前端一旦把 token 塞进这个头，
+// 症状就是登录成功后一进受保护页面就被弹回登录页（用户报的正是这个）。
+// 所以必须正面验一次：带 X-Auth-Token 要能读到自己的账号。
+export function evaluateAuthRoundTrip({ customHeader, bearer } = {}) {
+  return [
+    check(
+      "登录态 · X-Auth-Token",
+      customHeader === 200,
+      customHeader === 200
+        ? "带 X-Auth-Token 能读到当前账号"
+        : `带 X-Auth-Token 请求 /api/auth/me 返回 ${customHeader}：登录后进受保护页面会被弹回登录页，先确认服务端与客户端都在用 X-Auth-Token`
+    ),
+    check(
+      "网关行为 · Authorization 头",
+      true,
+      bearer === 403
+        ? "带 Authorization 返回 403：被边缘网关拦下（ModelScope 创空间的既定行为），客户端不要再用这个头"
+        : `带 Authorization 返回 ${bearer}：本次没被网关拦截`,
+      false
+    )
+  ];
+}
+
+// 纯函数：一次性探针账号必须能注销干净，否则预检会在体验站里留垃圾账号。
+export function evaluateProbeCleanup({ deleted, afterDelete } = {}) {
+  return [
+    check("探针账号清理", deleted === 200, `注销一次性探针账号返回 ${deleted}`, true),
+    check("注销后会话失效", afterDelete === 401, `注销后再拿旧 token 读到 ${afterDelete}`)
+  ];
+}
+
 // 纯函数：首页必须是能跑起来的生产构建（不能只返回一个空白壳）。
 export function evaluatePage(html, statusCode) {
   const checks = [];
@@ -176,6 +213,77 @@ function report(base, checks) {
   }
 }
 
+async function postJson(url, payload, headers = {}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(20000)
+  });
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {
+    data = null;
+  }
+  return { status: res.status, data };
+}
+
+async function getWithToken(url, headers) {
+  try {
+    const res = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(20000) });
+    return res.status;
+  } catch {
+    return 0;
+  }
+}
+
+// 正面验一次"登录之后登录态真的能用"：探针账号优先取 PREFLIGHT_ACCOUNT / PREFLIGHT_PASSWORD；
+// 没给就在注册开放时注册一个一次性账号，验完立刻注销。
+async function checkAuthRoundTrip(base, checks, accounts) {
+  const account = String(process.env.PREFLIGHT_ACCOUNT || "").trim();
+  const password = String(process.env.PREFLIGHT_PASSWORD || "");
+  let token = "";
+  let probe = null;
+
+  if (account && password) {
+    const login = await postJson(`${base}/api/auth/login`, { account, password });
+    if (login.status !== 200 || !login.data?.token) {
+      checks.push(check("登录态 · X-Auth-Token", false, `探针账号 ${account} 登录失败，返回 ${login.status}`));
+      return;
+    }
+    token = login.data.token;
+  } else if (accounts?.signup && process.env.PREFLIGHT_NO_SIGNUP !== "1") {
+    probe = { account: `preflight-${Date.now().toString(36)}`, password: "Preflight1probe2" };
+    const register = await postJson(`${base}/api/auth/register`, probe);
+    if (register.status !== 200 || !register.data?.token) {
+      checks.push(check("登录态 · X-Auth-Token", false, `一次性探针账号注册失败，返回 ${register.status}`));
+      return;
+    }
+    token = register.data.token;
+  } else {
+    checks.push(
+      check(
+        "登录态 · X-Auth-Token",
+        true,
+        "没给 PREFLIGHT_ACCOUNT / PREFLIGHT_PASSWORD（且注册已关闭），跳过登录态往返核验",
+        false
+      )
+    );
+    return;
+  }
+
+  const customHeader = await getWithToken(`${base}/api/auth/me`, { "X-Auth-Token": token });
+  const bearer = await getWithToken(`${base}/api/auth/me`, { Authorization: `Bearer ${token}` });
+  checks.push(...evaluateAuthRoundTrip({ customHeader, bearer }));
+
+  if (!probe) return;
+
+  const removed = await postJson(`${base}/api/account/delete`, { password: probe.password }, { "X-Auth-Token": token });
+  const afterDelete = await getWithToken(`${base}/api/auth/me`, { "X-Auth-Token": token });
+  checks.push(...evaluateProbeCleanup({ deleted: removed.status, afterDelete }));
+}
+
 async function main() {
   const base = (process.argv[2] || process.env.PREFLIGHT_BASE || DEFAULT_BASE).replace(/\/+$/, "");
   const checks = [];
@@ -198,6 +306,12 @@ async function main() {
     checks.push(...evaluateAuthBoundary({ me: me.status, resumes: resumes.status }));
   } catch (err) {
     checks.push(check("认证边界", false, `认证接口不可达：${err?.message || err}`));
+  }
+
+  try {
+    await checkAuthRoundTrip(base, checks, health?.accounts);
+  } catch (err) {
+    checks.push(check("登录态 · X-Auth-Token", false, `登录态往返核验失败：${err?.message || err}`));
   }
 
   try {

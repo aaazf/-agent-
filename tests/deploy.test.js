@@ -188,4 +188,17 @@ describe("部署文档与环境变量样例不腐化", () => {
     expect(deployDoc).toContain("X-Auth-Token");
     expect(deployDoc).toMatch(/403/);
   });
+
+  // 部署自检必须正面验一次登录态：只验"无 token → 401"时，
+  // 上面那个线上故障（登录后被弹回登录页）在自检里是全绿的。
+  it("部署自检验证登录态往返，而不只是未登录 401", () => {
+    const preflight = read("scripts/preflight.mjs");
+    expect(preflight).toContain("evaluateAuthRoundTrip");
+    expect(preflight).toContain("checkAuthRoundTrip");
+    expect(preflight).toContain('"X-Auth-Token": token');
+    expect(preflight).toContain("/api/account/delete");
+    expect(preflight).toContain("PREFLIGHT_ACCOUNT");
+    expect(preflight).toContain("PREFLIGHT_NO_SIGNUP");
+    expect(deployDoc).toContain("PREFLIGHT_ACCOUNT");
+  });
 });
