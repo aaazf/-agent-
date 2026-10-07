@@ -22,7 +22,14 @@ import {
   X,
   Zap
 } from "lucide-react";
-import { callModel, canUseModel, generateInterviewerDecision, buildEvaluateMessages, extractJson } from "../lib/model.js";
+import {
+  callModel,
+  canUseModel,
+  decisionLabel,
+  generateInterviewerDecision,
+  buildEvaluateMessages,
+  extractJson
+} from "../lib/model.js";
 import { localQuestion } from "../lib/questions.js";
 import { localEvaluation, normalizeModelEvaluation } from "../lib/evaluate.js";
 import { addResult, clearSession, loadConsent, loadSession, saveConsent, saveSession, uid } from "../lib/storage.js";
@@ -300,21 +307,17 @@ export default function InterviewView({ settings, onFinish, onExit }) {
     if (!forceLocal && (await canUseModel(settings))) {
       try {
         const decision = await generateInterviewerDecision({ settings, history: nextHistory });
-        const focusMap = {
-          followup: "针对回答追问",
-          new_dimension: "切换新维度",
-          probe: "深挖验证",
-          wrap: "收束话题"
-        };
         question = {
           text: decision.text,
-          focus: focusMap[decision.type] || "模型动态出题",
+          focus: decisionLabel(decision.type),
           source: "model",
           decisionType: decision.type,
           understanding: decision.understanding,
           strategy: decision.strategy
         };
-        setSourceNote(`${settings.modelName} 理解回答后决策：${decision.type}`);
+        // 徽标里写"实际生效的模型"：用共享额度时是部署方选的模型，不是设置页里的名字。
+        const activeModel = displayModelName({ settings, hosted: hostedRef.current }) || "模型";
+        setSourceNote(`${activeModel} 判断后：${decisionLabel(decision.type)}`);
       } catch {
         question = localQuestion(settings, nextHistory.length);
         setSourceNote("模型调用失败，已切到本地题库兜底");

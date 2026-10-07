@@ -201,6 +201,19 @@ export function normalizeInterviewerDecision(data) {
   };
 }
 
+// 决策类型是内部 token（followup / new_dimension / probe / wrap）：
+// 它只能用来分支，不能直接显示给用户——界面上必须换成中文说法。
+export const DECISION_LABELS = {
+  followup: "针对回答追问",
+  new_dimension: "切换新维度",
+  probe: "深挖验证",
+  wrap: "收束话题"
+};
+
+export function decisionLabel(type) {
+  return DECISION_LABELS[type] || "模型动态出题";
+}
+
 export async function generateInterviewerDecision({ settings, history }) {
   const raw = await callModel({
     settings,
