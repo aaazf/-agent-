@@ -17,6 +17,7 @@ import {
 import GalaxyCanvas from "./GalaxyCanvas.jsx";
 import { loginAccount, registerAccount, saveToken } from "../lib/auth.js";
 import { dataFlowFull } from "../lib/privacy.js";
+import { getSpeechRecognitionCtor } from "../hooks/useSpeechRecognition.js";
 import { fetchHealth } from "../lib/runtime.js";
 
 export default function LoginView({ onAuthed, notice = "" }) {
@@ -28,12 +29,15 @@ export default function LoginView({ onAuthed, notice = "" }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [accounts, setAccounts] = useState(null);
+  const [asr, setAsr] = useState(null);
 
   useEffect(() => {
     let alive = true;
     // 注册开关/邀请码/持久化能力都由服务端告诉我们，避免前后端两套默认值。
     fetchHealth().then((health) => {
-      if (alive) setAccounts(health?.accounts || null);
+      if (!alive) return;
+      setAccounts(health?.accounts || null);
+      setAsr(health?.asr || null);
     });
     return () => {
       alive = false;
@@ -42,6 +46,11 @@ export default function LoginView({ onAuthed, notice = "" }) {
 
   const signupOpen = accounts ? accounts.signup !== false : true;
   const inviteRequired = Boolean(accounts?.inviteRequired);
+
+  // 录音去往哪里，取决于本站实际用哪种识别：探测结果拿到之前传 undefined，
+  // 让文案退回中性说法，避免先闪一句与本站不符的承诺。
+  const browserAsr = Boolean(getSpeechRecognitionCtor());
+  const voiceEngine = asr ? (asr.available ? "server" : browserAsr ? "browser" : "text") : undefined;
 
   async function submit(e) {
     e.preventDefault();
@@ -280,7 +289,7 @@ export default function LoginView({ onAuthed, notice = "" }) {
 
           <p className="login-note">
             <Sparkles size={13} />
-            {dataFlowFull}
+            {dataFlowFull(voiceEngine)}
           </p>
           {accounts && accounts.persistent === false ? (
             <p className="login-note login-note-warn">

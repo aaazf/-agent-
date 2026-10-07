@@ -282,7 +282,7 @@ export default function ReportView({ result, onBack, onNew }) {
           <p>
             评分与改进建议由{stats.modelUsed ? "模型" : "本地规则"}根据本场问答生成，只用于练习参考，不代表真实面试结论或录用判断。
           </p>
-          <p>{dataFlowFull}</p>
+          <p>{dataFlowFull(stats.voiceEngine)}</p>
         </div>
       </section>
     </div>

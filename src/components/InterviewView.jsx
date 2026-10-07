@@ -522,6 +522,7 @@ export default function InterviewView({ settings, onFinish, onExit }) {
         pauseCount: totalPauses,
         hintsUsed,
         modelUsed: nextHistory.some((r) => r.source === "model"),
+        voiceEngine: voiceEngineRef.current || "text",
         earlyEnded: nextHistory.length < settings.questionCount
       },
       cameraUsed: cameraOn
