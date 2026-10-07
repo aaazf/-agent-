@@ -15,6 +15,30 @@ license: Apache License 2.0
 
 需要分享给社区时，可直接部署到 ModelScope 创空间，见 [部署到 ModelScope 创空间](docs/deploy-modelscope.md)。
 
+在线体验：[aaaxzf-agent.ms.show](https://aaaxzf-agent.ms.show)（魔搭创空间）。
+
+## 界面
+
+![登录页：从准备到复盘，一场面试拆成完整闭环](docs/screenshots/01-login.png)
+
+| 接入模型：填自己的 Key，或用站点共享额度 | 面试准备：简历 + 岗位 JD → 候选人画像 |
+| --- | --- |
+| ![模型接入](docs/screenshots/02-model-access.png) | ![简历与岗位](docs/screenshots/03-resume-and-jd.png) |
+
+| 模拟面试：模型按回答决定追问或换题 | 复盘报告：多维评分 + 逐题改进建议 |
+| --- | --- |
+| ![模拟面试](docs/screenshots/06-interview-live.png) | ![复盘报告](docs/screenshots/07-report.png) |
+
+其余界面：[设备检测与面试类型](docs/screenshots/04-device-check.png) · [录音去向告知（确认后才开始录音）](docs/screenshots/05-voice-consent.png) · [最近 7 场对比与账号数据出口](docs/screenshots/08-records.png)
+
+## 它做对了什么
+
+- **模型贯穿整场，不是题库朗读**：出题、追问、整场评分都由模型完成，每一轮按你的回答决定"继续追问还是换题"；一场 6 题的面试实测产生 13 次上游调用（6 次出题 + 6 次追问 + 1 次整场评分）。
+- **语音三级自动降级**：服务端语音识别 → 浏览器自带识别 → 文字作答，缺哪一级都不会把面试卡住；录音去往哪里在开始前如实告知，且必须确认后才开始录。
+- **账号与数据隔离**：注册 / 登录 / 注销 / 导出全链路；口令只存 scrypt 加盐哈希，登录 token 只存 sha256 摘要；简历与面试数据按账号隔离，支持 PDF / Word 直接解析成候选人画像。
+- **公开站点的成本闸门**：按 IP 与按天的多层限流（单访客 40 次/天、全站 800 次/天、语音识别 600 次/天、注册 200 次/天、登录失败 8 次/15 分钟），共享模型额度可一键开关并带当日余额预警。
+- **把边界钉进测试**：单元测试 + 真实 Chrome 端到端 + 部署护栏三层，另有 `npm run preflight` 部署自检，一条命令核完 17 项线上能力（包含"登录之后登录态还能不能用"这条曾经线上翻车的链路）。
+
 ## 启动
 
 ```bash
