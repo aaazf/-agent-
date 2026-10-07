@@ -69,10 +69,10 @@ export async function callRoute(routes, path, payload, options = {}) {
   return { res, json: parseJson(res), status: res.statusCode };
 }
 
-// 带登录态的调用：把 token 放进 Authorization 头。
+// 带登录态的调用：把 token 放进 X-Auth-Token 头（Authorization 会被 ModelScope 网关 403）。
 export function withToken(token, options = {}) {
   return {
     ...options,
-    headers: { ...(options.headers || {}), authorization: `Bearer ${token}` }
+    headers: { ...(options.headers || {}), "x-auth-token": token }
   };
 }

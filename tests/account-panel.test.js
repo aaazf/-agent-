@@ -54,7 +54,7 @@ describe("账号与数据面板", () => {
     fireEvent.click(screen.getByText("导出账号数据"));
     await waitFor(() => expect(screen.getByText(/已导出账号信息与 2 份简历/)).toBeTruthy());
     expect(calls[0].url).toBe("/api/account/export");
-    expect(calls[0].init.headers.Authorization).toBe("Bearer tok-1");
+    expect(calls[0].init.headers["X-Auth-Token"]).toBe("tok-1");
     expect(URL.createObjectURL).toHaveBeenCalled();
   });
 

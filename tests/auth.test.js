@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTH_TOKEN_HEADER,
   PASSWORD_MIN_LENGTH,
   createSessionToken,
   hashPassword,
   hashToken,
   normalizeAccount,
-  readBearer,
+  readAuthToken,
   validateAccount,
   validatePassword,
   verifyPassword
@@ -77,11 +78,22 @@ describe("session tokens", () => {
     expect(first.tokenHash).not.toContain(first.token);
   });
 
-  it("parses only well-formed bearer headers", () => {
-    expect(readBearer({ headers: { authorization: "Bearer abc" } })).toBe("abc");
-    expect(readBearer({ headers: { authorization: "bearer  spaced " } })).toBe("spaced");
-    expect(readBearer({ headers: { authorization: "Basic abc" } })).toBe("");
-    expect(readBearer({ headers: {} })).toBe("");
-    expect(readBearer({})).toBe("");
+  // ModelScope 的网关会把带 Authorization 的请求回 403，所以主通道是自定义头。
+  it("reads the session from the X-Auth-Token header", () => {
+    expect(readAuthToken({ headers: { "x-auth-token": "custom-token" } })).toBe("custom-token");
+    expect(readAuthToken({ headers: { "X-Auth-Token": "  spaced  " } })).toBe("spaced");
+    expect(readAuthToken({ headers: { [AUTH_TOKEN_HEADER]: "from-constant" } })).toBe("from-constant");
+  });
+
+  it("still accepts well-formed Authorization headers for compatibility", () => {
+    expect(readAuthToken({ headers: { authorization: "Bearer abc" } })).toBe("abc");
+    expect(readAuthToken({ headers: { authorization: "bearer  spaced " } })).toBe("spaced");
+    expect(readAuthToken({ headers: { authorization: "Basic abc" } })).toBe("");
+    expect(readAuthToken({ headers: {} })).toBe("");
+    expect(readAuthToken({})).toBe("");
+  });
+
+  it("prefers the custom header when both are present", () => {
+    expect(readAuthToken({ headers: { "x-auth-token": "win", authorization: "Bearer lose" } })).toBe("win");
   });
 });

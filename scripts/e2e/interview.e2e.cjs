@@ -542,7 +542,8 @@ async function readServerResumes(target) {
   return target.evaluate(async () => {
     const token = localStorage.getItem("face-interview-auth-token-v1");
     if (!token) return { error: "没有 token", count: -1 };
-    const res = await fetch("/api/resumes", { headers: { Authorization: `Bearer ${token}` } });
+    // 走 X-Auth-Token：ModelScope 的网关会拦掉带 Authorization 的请求（403）。
+    const res = await fetch("/api/resumes", { headers: { "X-Auth-Token": token } });
     const data = await res.json();
     return { status: res.status, count: (data.resumes || []).length, titles: (data.resumes || []).map((item) => item.title) };
   });

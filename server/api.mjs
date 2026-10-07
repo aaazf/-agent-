@@ -11,7 +11,7 @@ import path from "node:path";
 import { MODEL_CATALOG } from "../src/lib/providers.js";
 import { ACCOUNT_ROUTE_METHODS, createAccountHandlers, signupStatus } from "./account-routes.mjs";
 import { ASR_CONFIG, asrStatus, transcribeAudio } from "./asr.mjs";
-import { hashToken, readBearer } from "./auth.mjs";
+import { hashToken, readAuthToken } from "./auth.mjs";
 import { loadDotEnv, projectRoot } from "./env.mjs";
 import { HttpError, MAX_BODY_BYTES, fail, numberFromEnv, readBinaryBody, readJsonBody, sendJson } from "./http.mjs";
 import { clientKey, createDailyBudget, createKeyedDailyBudget, createSlidingWindowLimiter } from "./quota.mjs";
@@ -65,7 +65,7 @@ function storeRef() {
 // 同一间宿舍/公司出口 IP 后面可能坐着十几个访客，按 IP 计数会让彼此互相挤掉额度；
 // 而按账号计数也顺手把"注册一个新号就重置额度"限制在注册名额（SIGNUPS_PER_DAY）之内。
 function hostedQuotaKey(req) {
-  const token = readBearer(req);
+  const token = readAuthToken(req);
   if (token) {
     const session = storeRef().sessions.byTokenHash(hashToken(token));
     if (session) return `user:${session.userId}`;

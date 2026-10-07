@@ -91,13 +91,32 @@ export function hashToken(token) {
   return crypto.createHash("sha256").update(String(token || ""), "utf8").digest("base64url");
 }
 
-// 客户端用 `Authorization: Bearer <token>` 携带登录态。
-// 为什么不用 Cookie：创空间是"内嵌在 modelscope.cn 页面里的 iframe"，
-// 第三方上下文里的 Cookie 会被 Chrome/Safari 直接拦掉，登录态会时有时无；
-// 而 Authorization 头不受第三方 Cookie 策略影响，且浏览器不会自动携带，
-// 天然免疫 CSRF（代价是需要靠 CSP + React 转义来防 XSS，见 deploy 文档）。
-export function readBearer(req) {
-  const header = String(req?.headers?.authorization || "");
+// 登录态用什么承载：这里踩过一次线上故障，值得写下来。
+//   最初用 `Authorization: Bearer <token>`。在 ModelScope 创空间上，平台的边缘网关会把
+//   带 Authorization 头的请求直接回 403（实测：同一个请求去掉这个头就正常转发到应用），
+//   表现为"登录成功 → 进下一屏时第一次受保护请求 403 → 前端判定登录态失效 → 弹回登录页"。
+//   实测：自定义头 / Cookie / 查询参数都能穿过网关，只有 Authorization 不行。
+// 所以现在的规则是：主通道 `X-Auth-Token`，`Authorization: Bearer` 仅作兼容保留
+//   （自建服务器、脚本/curl 调用时仍可用）。两者浏览器都不会自动携带，跨站也带不上
+//   （自定义头会触发 CORS 预检），因此不存在 CSRF 面。
+// 不用 Cookie 的原因照旧：创空间把本站内嵌在 modelscope.cn 页面里，
+//   第三方上下文的 Cookie 会被浏览器直接拦掉，登录态会时有时无。
+export const AUTH_TOKEN_HEADER = "x-auth-token";
+
+// 头名大小写不敏感（Node 收到的请求头一律小写，但测试/代理可能给别的写法）。
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== "object") return "";
+  const direct = headers[name];
+  if (direct !== undefined) return String(direct);
+  const key = Object.keys(headers).find((item) => item.toLowerCase() === name);
+  return key ? String(headers[key]) : "";
+}
+
+export function readAuthToken(req) {
+  const headers = req?.headers;
+  const custom = headerValue(headers, AUTH_TOKEN_HEADER).trim();
+  if (custom) return custom;
+  const header = headerValue(headers, "authorization");
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   return match ? match[1].trim() : "";
 }

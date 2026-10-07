@@ -167,4 +167,25 @@ describe("部署文档与环境变量样例不腐化", () => {
     expect(inScript, "e2e 脚本里一处 check( 都没有，断言解析可能失效").toBeGreaterThan(20);
     expect(stated, `文档写 ${stated} 条，但脚本里已有 ${inScript} 处 check(`).toBeGreaterThanOrEqual(inScript);
   });
+
+  // 线上故障回归：Authorization 头会被 ModelScope 网关直接 403，
+  // 客户端只能走自定义头，这条钉住"别再改回去"。
+  it("客户端不带 Authorization 头，服务端用 X-Auth-Token 读登录态", () => {
+    const client = read("src/lib/auth.js");
+    const codeOnly = client
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("//") && !line.trim().startsWith("*"))
+      .join("\n");
+    expect(client).toContain("X-Auth-Token");
+    expect(codeOnly, "src/lib/auth.js 的代码里不该再出现 Authorization").not.toContain("Authorization");
+
+    const server = read("server/auth.mjs");
+    expect(server).toContain("AUTH_TOKEN_HEADER");
+    expect(server).toContain("readAuthToken");
+    expect(server).toContain("authorization"); // 兼容路径保留
+    expect(read("server/account-routes.mjs")).not.toContain("readBearer");
+
+    expect(deployDoc).toContain("X-Auth-Token");
+    expect(deployDoc).toMatch(/403/);
+  });
 });

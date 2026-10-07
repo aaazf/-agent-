@@ -47,11 +47,12 @@ afterEach(() => {
 });
 
 describe("认证请求封装", () => {
-  it("带上 Bearer 头并返回服务端数据", async () => {
+  it("用 X-Auth-Token 头带登录态（Authorization 会被 ModelScope 网关 403）", async () => {
     saveToken("tok-1");
     const calls = stubFetch(jsonResponse({ ok: true }));
     await request("/api/auth/logout", { body: {} });
-    expect(calls[0].init.headers.Authorization).toBe("Bearer tok-1");
+    expect(calls[0].init.headers["X-Auth-Token"]).toBe("tok-1");
+    expect(calls[0].init.headers.Authorization).toBeUndefined();
   });
 
   it("把后端的错误码与状态透出来", async () => {

@@ -1,8 +1,9 @@
 // 账号与简历接口：注册 / 登录 / 退出 / 会话自检 / 简历增删查 / 数据导出与注销。
 //
 // 设计取舍：
-//   * 登录态用 `Authorization: Bearer <token>`（见 auth.mjs 里的说明），
-//     不用 Cookie——创空间是内嵌 iframe，第三方 Cookie 会被浏览器拦掉。
+//   * 登录态用 `X-Auth-Token: <token>` 承载（见 auth.mjs 里的说明），
+//     不用 Cookie——创空间是内嵌 iframe，第三方 Cookie 会被浏览器拦掉；
+//     也不用 Authorization——ModelScope 的网关会把带该头的请求回 403。
 //   * 口令只存 scrypt 哈希，token 只存 sha256 哈希，两者都不落明文。
 //   * 简历的归属判断放在 store 层（按 userId 过滤），路由层再兜一层，
 //     避免"哪个 handler 忘了校验"就变成任意用户读取他人简历。
@@ -11,7 +12,7 @@ import {
   hashPassword,
   hashToken,
   normalizeAccount,
-  readBearer,
+  readAuthToken,
   validateAccount,
   validatePassword,
   verifyPassword
@@ -105,7 +106,7 @@ export function createAccountHandlers({ store } = {}) {
   }
 
   function requireUser(req) {
-    const token = readBearer(req);
+    const token = readAuthToken(req);
     if (!token) throw new HttpError(401, "请先登录", "unauthenticated");
     const tokenHash = hashToken(token);
     const session = db.sessions.byTokenHash(tokenHash);
@@ -191,7 +192,7 @@ export function createAccountHandlers({ store } = {}) {
 
   async function handleLogout(req, res) {
     try {
-      const token = readBearer(req);
+      const token = readAuthToken(req);
       // 退出登录必须幂等：token 过期/被删时前端也要能干净地退到登录页。
       if (token) db.sessions.remove(hashToken(token));
       sendJson(res, 200, { ok: true });

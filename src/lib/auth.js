@@ -1,10 +1,17 @@
 // 账号相关的浏览器端封装：登录态存取 + 认证接口调用。
 //
-// token 存在 localStorage 而不是 Cookie：创空间是把本站内嵌在 modelscope.cn
-// 页面里的 iframe，第三方上下文里的 Cookie 会被浏览器直接拦掉，登录态会时有时无。
+// 登录态怎么带：token 存在 localStorage，随请求放在自定义头 `X-Auth-Token` 里。
+//   * 不用 Cookie：创空间把本站内嵌在 modelscope.cn 页面里的 iframe，
+//     第三方上下文的 Cookie 会被浏览器直接拦掉，登录态会时有时无；
+//   * 更关键的是不用 `Authorization: Bearer`：ModelScope 的边缘网关会把带这个头的
+//     请求直接回 403（实测同一请求去掉该头即正常转发），症状是"登录后一进下一屏
+//     就被弹回登录页"。自定义头两边都不沾：不受第三方 Cookie 策略影响，网关也不拦。
 // 代价是"XSS 能偷走 token"，对应的防线是：CSP 只允许 self 脚本 + 全站不使用
 // dangerouslySetInnerHTML（渲染模型输出也走 React 转义）。
 const TOKEN_KEY = "face-interview-auth-token-v1";
+
+// 与服务端 server/auth.mjs 的 AUTH_TOKEN_HEADER 保持一致。
+export const AUTH_TOKEN_HEADER = "X-Auth-Token";
 
 export class ApiError extends Error {
   constructor(message, { status = 0, code = "" } = {}) {
@@ -45,7 +52,7 @@ export function clearToken() {
 
 export function authHeaders(extra = {}) {
   const token = loadToken();
-  return token ? { ...extra, Authorization: `Bearer ${token}` } : { ...extra };
+  return token ? { ...extra, [AUTH_TOKEN_HEADER]: token } : { ...extra };
 }
 
 // 会话过期时的全局回调：让 App 能把访客请回登录页，而不是让页面停在
